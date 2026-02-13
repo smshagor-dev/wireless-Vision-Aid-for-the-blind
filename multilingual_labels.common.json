@@ -1,4 +1,22 @@
 {
+  "__phrases__": {
+    "en": {
+      "left": "in left",
+      "right": "in right",
+      "in front": "in front",
+      "too far": "too far",
+      "close": "close",
+      "very close": "very close"
+    },
+    "ru": {
+      "left": "слева",
+      "right": "справа",
+      "in front": "спереди",
+      "too far": "далеко",
+      "close": "близко",
+      "very close": "очень близко"
+    }
+  },
   "person": {"en": "Person", "ru": "Человек"},
   "bicycle": {"en": "Bicycle", "ru": "Велосипед"},
   "car": {"en": "Car", "ru": "Машина"},

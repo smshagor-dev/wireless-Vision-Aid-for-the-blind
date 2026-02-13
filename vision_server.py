@@ -15,6 +15,7 @@ import queue
 import os
 import subprocess
 import json
+import unicodedata
 
 class VisionAidServer:
     def __init__(
@@ -34,6 +35,7 @@ class VisionAidServer:
         self.camera_url = camera_url
         self.model = YOLO(model_path)
         self.language = language
+        self.speech_language = self.language
         self.labels_path = labels_path
         self.tts_engine = None
         self.cpp_speaker_path = self._find_cpp_speaker()
@@ -94,6 +96,10 @@ class VisionAidServer:
         self.running = False
         self.frame_buffer = deque(maxlen=30)
         self.multilingual_labels = self._load_multilingual_labels(self.labels_path)
+        self.available_languages = self._detect_available_languages(self.multilingual_labels)
+        if self.language not in self.available_languages:
+            self.language = "en"
+        self.speech_language = self._resolve_speech_language(self.language)
         self.navigation_phrases = {
             "STOP - obstacle very close": {
                 "en": "STOP obstacle very close",
@@ -129,6 +135,40 @@ class VisionAidServer:
                 return path
         return None
 
+    def _detect_tts_languages(self):
+        langs = {"en"}
+        if os.name != "nt":
+            return langs
+        try:
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            cmd = (
+                "Add-Type -AssemblyName System.Speech; "
+                "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                "$s.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Culture.Name }"
+            )
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", cmd],
+                capture_output=True,
+                text=True,
+                check=False,
+                creationflags=flags,
+                timeout=5,
+            )
+            for line in (r.stdout or "").splitlines():
+                code = line.strip().lower()
+                if code:
+                    langs.add(code.split("-")[0])
+        except Exception:
+            pass
+        return langs
+
+    def _resolve_speech_language(self, requested_language):
+        installed = self._detect_tts_languages()
+        if requested_language in installed:
+            return requested_language
+        print(f"Warning: TTS voice for '{requested_language}' not found. Falling back to 'en'.")
+        return "en"
+
     def _load_multilingual_labels(self, path):
         if not path or not os.path.exists(path):
             return {}
@@ -138,6 +178,16 @@ class VisionAidServer:
         except Exception as exc:
             print(f"Warning: could not load labels file '{path}': {exc}")
             return {}
+
+    def _detect_available_languages(self, labels):
+        langs = {"en"}
+        if isinstance(labels, dict):
+            for value in labels.values():
+                if isinstance(value, dict):
+                    for k in value.keys():
+                        if isinstance(k, str) and k.strip():
+                            langs.add(k.strip().lower())
+        return sorted(langs)
 
     def set_language(self, language):
         self.language = (language or "en").strip().lower()
@@ -154,6 +204,61 @@ class VisionAidServer:
         if isinstance(mapping, dict):
             return mapping.get(self.language, mapping.get("en", instruction))
         return instruction
+
+    def _localized_direction(self, direction):
+        phrases = self.multilingual_labels.get("__phrases__", {})
+        if isinstance(phrases, dict):
+            lang_map = phrases.get(self.language, {})
+            if isinstance(lang_map, dict):
+                maybe = lang_map.get(direction)
+                if isinstance(maybe, str) and maybe.strip():
+                    return maybe
+        table = {
+            "en": {"left": "in left", "right": "in right", "in front": "in front"},
+            "ru": {"left": "слева", "right": "справа", "in front": "спереди"},
+        }
+        return table.get(self.language, table["en"]).get(direction, direction)
+
+    def _localized_distance(self, distance):
+        phrases = self.multilingual_labels.get("__phrases__", {})
+        if isinstance(phrases, dict):
+            lang_map = phrases.get(self.language, {})
+            if isinstance(lang_map, dict):
+                maybe = lang_map.get(distance)
+                if isinstance(maybe, str) and maybe.strip():
+                    return maybe
+        table = {
+            "en": {"too far": "too far", "close": "close", "very close": "very close"},
+            "ru": {"too far": "далеко", "close": "близко", "very close": "очень близко"},
+        }
+        return table.get(self.language, table["en"]).get(distance, distance)
+
+    def _overlay_safe_text(self, text):
+        try:
+            text.encode("ascii")
+            return text
+        except UnicodeEncodeError:
+            normalized = unicodedata.normalize("NFKD", text)
+            ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+            return ascii_text if ascii_text.strip() else "object"
+
+
+def detect_languages_from_labels_file(path):
+    langs = {"en"}
+    if not path or not os.path.exists(path):
+        return sorted(langs)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            for value in data.values():
+                if isinstance(value, dict):
+                    for k in value.keys():
+                        if isinstance(k, str) and k.strip():
+                            langs.add(k.strip().lower())
+    except Exception as exc:
+        print(f"Warning: language detection from labels failed: {exc}")
+    return sorted(langs)
 
     def prettify_class_name(self, class_name):
         return class_name.replace("_", " ").strip().title()
@@ -183,7 +288,7 @@ class VisionAidServer:
                 print(f"TTS error: {e}")
 
     def _speak_blocking(self, text):
-        if self.cpp_speaker_path and os.name == "nt":
+        if self.cpp_speaker_path and os.name == "nt" and self.speech_language == "en":
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             result = subprocess.run(
                 [self.cpp_speaker_path, text],
@@ -196,9 +301,14 @@ class VisionAidServer:
 
         if os.name == "nt":
             escaped = text.replace("'", "''")
+            escaped_lang = (self.speech_language or "en").replace("'", "''")
             ps_cmd = (
                 "Add-Type -AssemblyName System.Speech; "
                 "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                f"$lang='{escaped_lang}'; "
+                "$v=$s.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo } | "
+                "Where-Object { $_.Culture.TwoLetterISOLanguageName -eq $lang } | Select-Object -First 1; "
+                "if($v){$s.SelectVoice($v.Name)}; "
                 "$s.Rate=2; "
                 f"$s.Speak('{escaped}')"
             )
@@ -341,11 +451,20 @@ class VisionAidServer:
                 continue
 
             if direction == "in front":
-                message = f"{spoken_name} in front, {distance}"
+                message = (
+                    f"{spoken_name} {self._localized_direction(direction)}, "
+                    f"{self._localized_distance(distance)}"
+                )
             elif direction == "left":
-                message = f"{spoken_name} in left, {distance}"
+                message = (
+                    f"{spoken_name} {self._localized_direction(direction)}, "
+                    f"{self._localized_distance(distance)}"
+                )
             else:
-                message = f"{spoken_name} in right, {distance}"
+                message = (
+                    f"{spoken_name} {self._localized_direction(direction)}, "
+                    f"{self._localized_distance(distance)}"
+                )
             if distance == "very close":
                 message = f"Warning. {message}"
             self.speak(message)
@@ -427,6 +546,7 @@ class VisionAidServer:
             
             # Draw label
             label = f"{class_name} {confidence:.2f} ({direction}, {det['distance']})"
+            label = self._overlay_safe_text(label)
             cv2.putText(frame, label, (bbox[0], bbox[1] - 10),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
@@ -610,18 +730,28 @@ def main():
     print(f"Model: {MODEL_PATH}")
     print("=" * 50)
 
+    labels_path = "multilingual_labels.common.json"
+    available_languages = detect_languages_from_labels_file(labels_path)
+
     print("\nSelect voice language:")
-    print("1. English (en)")
-    print("2. Russian (ru)")
-    lang_choice = input("Enter choice (1/2): ").strip()
-    language = "ru" if lang_choice == "2" else "en"
+    for idx, lang in enumerate(available_languages, start=1):
+        print(f"{idx}. {lang}")
+
+    lang_choice = input(f"Enter choice (1-{len(available_languages)}): ").strip()
+    try:
+        lang_idx = int(lang_choice) - 1
+    except ValueError:
+        lang_idx = 0
+    if lang_idx < 0 or lang_idx >= len(available_languages):
+        lang_idx = 0
+    language = available_languages[lang_idx]
     
     # Initialize server
     server = VisionAidServer(
         camera_url=CAMERA_URL,
         model_path=MODEL_PATH,
         language=language,
-        labels_path="multilingual_labels.common.json",
+        labels_path=labels_path,
     )
     
     # Choose stream type based on camera

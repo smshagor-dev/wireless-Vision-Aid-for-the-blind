@@ -5,6 +5,8 @@ WVAB system testing and diagnostics utility.
 import sys
 import socket
 import time
+import os
+import json
 import cv2
 import numpy as np
 
@@ -233,7 +235,12 @@ class WVABTester:
 
         return frame_ok and fps_ok and brightness_ok and preview_ok
 
-    def test_camera_gui_real(self, camera_source=0):
+    def test_camera_gui_real(
+        self,
+        camera_source=0,
+        language="en",
+        labels_path="multilingual_labels.common.json",
+    ):
         """Launch real GUI camera test and keep running until user closes it."""
         self.print_header("Testing Camera GUI (Real Continuous Test)")
         try:
@@ -241,7 +248,12 @@ class WVABTester:
 
             print("Opening real camera GUI with ML detection...")
             print("Camera will stay ON until you close the GUI window.")
-            summary = run_camera_gui(camera_source=camera_source, model_path="yolov8n.pt")
+            summary = run_camera_gui(
+                camera_source=camera_source,
+                model_path="yolov8n.pt",
+                language=language,
+                labels_path=labels_path,
+            )
 
             camera_started = bool(summary.get("camera_started"))
             frames = int(summary.get("frames", 0))
@@ -251,6 +263,7 @@ class WVABTester:
             detected_total = int(summary.get("detected_total", 0))
 
             self.print_result("Camera GUI Session", camera_started, "GUI closed by user")
+            self.print_result("Camera GUI Language", True, f"Language: {language}")
             self.print_result("Camera GUI Frame Stream", frames > 0, f"Total frames: {frames}")
             self.print_result("Camera GUI ML Model", model_loaded, "YOLO model status")
             self.print_result(
@@ -267,7 +280,6 @@ class WVABTester:
         except Exception as e:
             self.print_result("Camera GUI Session", False, str(e))
             return False
-
     def test_complete_pipeline(self, camera_source=0):
         self.print_header("Testing Complete Pipeline")
         try:
@@ -394,6 +406,24 @@ class WVABTester:
                     print(f"  - {test}")
 
 
+def detect_languages_from_labels_file(path):
+    langs = {"en"}
+    if not path or not os.path.exists(path):
+        return sorted(langs)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            for value in data.values():
+                if isinstance(value, dict):
+                    for k in value.keys():
+                        if isinstance(k, str) and k.strip():
+                            langs.add(k.strip().lower())
+    except Exception:
+        pass
+    return sorted(langs)
+
+
 def main():
     print("=" * 60)
     print("  WVAB System Diagnostic Tool")
@@ -425,9 +455,22 @@ def main():
 
     choice = input("\nEnter choice (1-4): ").strip()
     url = ""
+    labels_path = "multilingual_labels.common.json"
 
     if choice == "1":
-        tester.test_camera_gui_real(0)
+        available_languages = detect_languages_from_labels_file(labels_path)
+        print("\nSelect test language:")
+        for idx, lang in enumerate(available_languages, start=1):
+            print(f"{idx}. {lang}")
+        lang_choice = input(f"Enter choice (1-{len(available_languages)}): ").strip()
+        try:
+            lang_idx = int(lang_choice) - 1
+        except ValueError:
+            lang_idx = 0
+        if lang_idx < 0 or lang_idx >= len(available_languages):
+            lang_idx = 0
+        test_language = available_languages[lang_idx]
+        tester.test_camera_gui_real(0, language=test_language, labels_path=labels_path)
     elif choice == "2":
         tester.test_camera_connection("http://192.168.4.1:81/stream")
     elif choice == "3":

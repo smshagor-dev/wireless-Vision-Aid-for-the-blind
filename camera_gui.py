@@ -5,15 +5,19 @@ Real webcam preview with YOLO object detection and real diagnostics.
 
 import os
 import time
+import json
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import queue
 import threading
 import subprocess
+import unicodedata
 from collections import deque
 
 import cv2
+import numpy as np
 from PIL import Image, ImageTk
+from PIL import ImageDraw, ImageFont
 import pyttsx3
 
 try:
@@ -23,12 +27,22 @@ except Exception:
 
 
 class CameraGUI:
-    def __init__(self, root, camera_source=0, model_path="yolov8n.pt"):
+    def __init__(
+        self,
+        root,
+        camera_source=0,
+        model_path="yolov8n.pt",
+        language="en",
+        labels_path="multilingual_labels.common.json",
+    ):
         self.root = root
         self.root.title("WVAB Camera GUI - Real Test + ML")
         self.root.geometry("1120x760")
 
         self.model_path = model_path
+        self.language = (language or "en").strip().lower()
+        self.speech_language = self.language
+        self.labels_path = labels_path
         self.model = None
         self.ml_enabled = False
         self.audio_enabled = True
@@ -46,6 +60,11 @@ class CameraGUI:
         self.last_gui_speech_time = 0.0
 
         self.object_labels = {}
+        self.multilingual_labels = self._load_multilingual_labels(self.labels_path)
+        self.available_languages = self._detect_available_languages(self.multilingual_labels)
+        if self.language not in self.available_languages:
+            self.language = "en"
+        self.speech_language = self._resolve_speech_language(self.language)
 
         self.cap = None
         self.camera_running = False
@@ -88,6 +107,7 @@ class CameraGUI:
         self.tts_thread = threading.Thread(target=self._tts_worker, daemon=True)
         self.tts_thread.start()
         self.last_spoken_text = ""
+        self.overlay_font = self._load_overlay_font()
 
         self._build_ui()
         self.source_var.set(str(camera_source))
@@ -111,6 +131,10 @@ class CameraGUI:
         self.ml_btn.pack(side=tk.LEFT, padx=4)
         self.audio_btn = tk.Button(top, text="Audio: ON", command=self.toggle_audio)
         self.audio_btn.pack(side=tk.LEFT, padx=4)
+        tk.Label(top, text="Lang:").pack(side=tk.LEFT, padx=(10, 3))
+        self.lang_var = tk.StringVar(value=self.language)
+        self.lang_menu = tk.OptionMenu(top, self.lang_var, *self.available_languages, command=self.set_language)
+        self.lang_menu.pack(side=tk.LEFT, padx=2)
         tk.Button(top, text="Exit", command=self.on_close).pack(side=tk.RIGHT, padx=4)
 
         body = tk.Frame(self.root)
@@ -156,6 +180,149 @@ class CameraGUI:
             self.ml_btn.configure(text="ML: OFF")
             self.status_var.set(f"Model load failed: {exc}")
 
+    def _load_multilingual_labels(self, path):
+        if not path or not os.path.exists(path):
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _detect_tts_languages(self):
+        langs = {"en"}
+        if os.name != "nt":
+            return langs
+        try:
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            cmd = (
+                "Add-Type -AssemblyName System.Speech; "
+                "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                "$s.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Culture.Name }"
+            )
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", cmd],
+                capture_output=True,
+                text=True,
+                check=False,
+                creationflags=flags,
+                timeout=5,
+            )
+            for line in (r.stdout or "").splitlines():
+                code = line.strip().lower()
+                if code:
+                    langs.add(code.split("-")[0])
+        except Exception:
+            pass
+        return langs
+
+    def _resolve_speech_language(self, requested_language):
+        installed = self._detect_tts_languages()
+        if requested_language in installed:
+            return requested_language
+        return "en"
+
+    def _detect_available_languages(self, labels):
+        langs = {"en"}
+        if isinstance(labels, dict):
+            for value in labels.values():
+                if isinstance(value, dict):
+                    for k in value.keys():
+                        if isinstance(k, str) and k.strip():
+                            langs.add(k.strip().lower())
+        return sorted(langs)
+
+    def set_language(self, language):
+        lang = (language or "en").strip().lower()
+        if lang not in self.available_languages:
+            lang = "en"
+        self.language = lang
+        self.speech_language = self._resolve_speech_language(lang)
+        if self.speech_language != self.language:
+            self.status_var.set(
+                f"Language: {self.language}, speech fallback: {self.speech_language} (voice not installed)"
+            )
+        else:
+            self.status_var.set(f"Language set to: {self.language}")
+
+    def translate_class_name(self, class_name, fallback_name):
+        entry = self.multilingual_labels.get(class_name)
+        if isinstance(entry, dict):
+            return entry.get(self.language, entry.get("en", fallback_name))
+        return fallback_name
+
+    def _localized_direction(self, direction):
+        phrases = self.multilingual_labels.get("__phrases__", {})
+        if isinstance(phrases, dict):
+            lang_map = phrases.get(self.language, {})
+            if isinstance(lang_map, dict):
+                maybe = lang_map.get(direction)
+                if isinstance(maybe, str) and maybe.strip():
+                    return maybe
+        dmap = {
+            "en": {"left": "in left", "right": "in right", "in front": "in front"},
+            "ru": {"left": "слева", "right": "справа", "in front": "спереди"},
+        }
+        table = dmap.get(self.language, dmap["en"])
+        return table.get(direction, direction)
+
+    def _localized_distance(self, distance):
+        phrases = self.multilingual_labels.get("__phrases__", {})
+        if isinstance(phrases, dict):
+            lang_map = phrases.get(self.language, {})
+            if isinstance(lang_map, dict):
+                maybe = lang_map.get(distance)
+                if isinstance(maybe, str) and maybe.strip():
+                    return maybe
+        dmap = {
+            "en": {"too far": "too far", "close": "close", "very close": "very close"},
+            "ru": {"too far": "далеко", "close": "близко", "very close": "очень близко"},
+        }
+        table = dmap.get(self.language, dmap["en"])
+        return table.get(distance, distance)
+
+    def _build_localized_object_phrase(self, object_name, direction, distance):
+        if self.language == "ru":
+            return f"{object_name} {self._localized_direction(direction)} {self._localized_distance(distance)}"
+        return f"{object_name} {self._localized_direction(direction)} {self._localized_distance(distance)}"
+
+    def _overlay_safe_text(self, text):
+        try:
+            text.encode("ascii")
+            return text
+        except UnicodeEncodeError:
+            normalized = unicodedata.normalize("NFKD", text)
+            ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+            return ascii_text if ascii_text.strip() else "object"
+
+    def _load_overlay_font(self):
+        font_candidates = [
+            "C:/Windows/Fonts/arial.ttf",
+            "C:/Windows/Fonts/seguiemj.ttf",
+            "C:/Windows/Fonts/segoeui.ttf",
+        ]
+        for path in font_candidates:
+            if os.path.exists(path):
+                try:
+                    return ImageFont.truetype(path, 18)
+                except Exception:
+                    continue
+        try:
+            return ImageFont.load_default()
+        except Exception:
+            return None
+
+    def _draw_unicode_text(self, frame, text, x, y, color_bgr):
+        if self.overlay_font is None:
+            cv2.putText(frame, self._overlay_safe_text(text), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_bgr, 2)
+            return frame
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(rgb)
+        draw = ImageDraw.Draw(img)
+        color_rgb = (int(color_bgr[2]), int(color_bgr[1]), int(color_bgr[0]))
+        draw.text((x, y), text, font=self.overlay_font, fill=color_rgb)
+        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+
     def _build_object_labels(self):
         labels = {}
         names = self.model.names if self.model is not None else {}
@@ -182,7 +349,7 @@ class CameraGUI:
         return None
 
     def _speak_blocking(self, text):
-        if self.cpp_speaker_path and os.name == "nt":
+        if self.cpp_speaker_path and os.name == "nt" and self.speech_language == "en":
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             result = subprocess.run(
                 [self.cpp_speaker_path, text],
@@ -195,9 +362,15 @@ class CameraGUI:
 
         if os.name == "nt":
             escaped = text.replace("'", "''")
+            escaped_lang = (self.speech_language or "en").replace("'", "''")
+            # If requested speech language isn't available, we already fallback to EN.
             ps_cmd = (
                 "Add-Type -AssemblyName System.Speech; "
                 "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                f"$lang='{escaped_lang}'; "
+                "$v=$s.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo } | "
+                "Where-Object { $_.Culture.TwoLetterISOLanguageName -eq $lang } | Select-Object -First 1; "
+                "if($v){$s.SelectVoice($v.Name)}; "
                 "$s.Rate=2; "
                 f"$s.Speak('{escaped}')"
             )
@@ -361,21 +534,23 @@ class CameraGUI:
                 bbox = box.xyxy[0].cpu().numpy().astype(int)
                 direction = self._object_direction(bbox, frame_w)
                 distance = self._object_distance(bbox, frame_w, frame_h)
-                pretty_name = self.object_labels.get(
+                default_name = self.object_labels.get(
                     class_name, class_name.replace("_", " ").strip().title()
                 )
+                pretty_name = self.translate_class_name(class_name, default_name)
 
-                label = f"{pretty_name} {conf:.2f} {direction} {distance}"
+                label = (
+                    f"{pretty_name} {conf:.2f} "
+                    f"{self._localized_direction(direction)} {self._localized_distance(distance)}"
+                )
                 color = (0, 0, 255) if distance == "very close" else (0, 255, 0)
                 cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
-                cv2.putText(
+                frame = self._draw_unicode_text(
                     frame,
                     label,
-                    (bbox[0], max(20, bbox[1] - 8)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
+                    int(bbox[0]),
+                    int(max(20, bbox[1] - 20)),
                     color,
-                    2,
                 )
 
                 detections.append((class_name, pretty_name, direction, distance, conf, bbox))
@@ -473,9 +648,10 @@ class CameraGUI:
             lines.append("No objects detected")
         else:
             for key, value in sorted(self.detected_counts.items(), key=lambda x: x[1], reverse=True):
-                pretty_name = self.object_labels.get(
+                default_name = self.object_labels.get(
                     key, key.replace("_", " ").strip().title()
                 )
+                pretty_name = self.translate_class_name(key, default_name)
                 lines.append(f"{pretty_name} ({key}): {value}")
 
         self.detect_box.configure(state=tk.NORMAL)
@@ -506,12 +682,7 @@ class CameraGUI:
         frame, detections = self._detect_real_objects(frame)
         if detections:
             first = detections[0]
-            if first[2] == "in front":
-                self.last_detect_text = f"{first[1]} in front {first[3]}"
-            elif first[2] == "left":
-                self.last_detect_text = f"{first[1]} in left {first[3]}"
-            else:
-                self.last_detect_text = f"{first[1]} in right {first[3]}"
+            self.last_detect_text = self._build_localized_object_phrase(first[1], first[2], first[3])
             self.maybe_speak_display_text(self.last_detect_text)
         else:
             self.last_detect_text = "No real objects yet"
@@ -670,16 +841,27 @@ class CameraGUI:
         self.root.destroy()
 
 
-def run_camera_gui(camera_source=0, model_path="yolov8n.pt"):
+def run_camera_gui(
+    camera_source=0,
+    model_path="yolov8n.pt",
+    language="en",
+    labels_path="multilingual_labels.common.json",
+):
     root = tk.Tk()
-    app = CameraGUI(root, camera_source=camera_source, model_path=model_path)
+    app = CameraGUI(
+        root,
+        camera_source=camera_source,
+        model_path=model_path,
+        language=language,
+        labels_path=labels_path,
+    )
     app.start_camera()
     root.mainloop()
     return app.get_summary()
 
 
 def main():
-    run_camera_gui(camera_source=0, model_path="yolov8n.pt")
+    run_camera_gui(camera_source=0, model_path="yolov8n.pt", language="en")
 
 
 if __name__ == "__main__":

@@ -3,25 +3,13 @@
 
 #include <iostream>
 #include <string>
-#include <vector>
 
 namespace {
 
-std::wstring Utf8ToWide(const std::string& input) {
-  if (input.empty()) return std::wstring();
-  const int size_needed = MultiByteToWideChar(
-      CP_UTF8, 0, input.c_str(), static_cast<int>(input.size()), nullptr, 0);
-  if (size_needed <= 0) return std::wstring();
-  std::wstring output(size_needed, L'\0');
-  MultiByteToWideChar(
-      CP_UTF8, 0, input.c_str(), static_cast<int>(input.size()), output.data(), size_needed);
-  return output;
-}
-
-std::string JoinArgs(int argc, char** argv) {
-  std::string text;
+std::wstring JoinWideArgs(int argc, wchar_t** argv) {
+  std::wstring text;
   for (int i = 1; i < argc; ++i) {
-    if (!text.empty()) text += " ";
+    if (!text.empty()) text += L" ";
     text += argv[i];
   }
   return text;
@@ -29,14 +17,13 @@ std::string JoinArgs(int argc, char** argv) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int wmain(int argc, wchar_t** argv) {
   if (argc < 2) {
     std::cerr << "Usage: wvab_speaker <text>\n";
     return 1;
   }
 
-  const std::string text_utf8 = JoinArgs(argc, argv);
-  const std::wstring text_wide = Utf8ToWide(text_utf8);
+  const std::wstring text_wide = JoinWideArgs(argc, argv);
   if (text_wide.empty()) {
     return 1;
   }
