@@ -242,24 +242,6 @@ class VisionAidServer:
             ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
             return ascii_text if ascii_text.strip() else "object"
 
-
-def detect_languages_from_labels_file(path):
-    langs = {"en"}
-    if not path or not os.path.exists(path):
-        return sorted(langs)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            for value in data.values():
-                if isinstance(value, dict):
-                    for k in value.keys():
-                        if isinstance(k, str) and k.strip():
-                            langs.add(k.strip().lower())
-    except Exception as exc:
-        print(f"Warning: language detection from labels failed: {exc}")
-    return sorted(langs)
-
     def prettify_class_name(self, class_name):
         return class_name.replace("_", " ").strip().title()
 
@@ -711,6 +693,24 @@ def detect_languages_from_labels_file(path):
             cv2.destroyAllWindows()
             self.speak("Vision aid system stopped")
             self.stop_tts()
+
+
+def detect_languages_from_labels_file(path):
+    langs = {"en"}
+    if not path or not os.path.exists(path):
+        return sorted(langs)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            for value in data.values():
+                if isinstance(value, dict):
+                    for k in value.keys():
+                        if isinstance(k, str) and k.strip():
+                            langs.add(k.strip().lower())
+    except Exception as exc:
+        print(f"Warning: language detection from labels failed: {exc}")
+    return sorted(langs)
 
 
 def main():
