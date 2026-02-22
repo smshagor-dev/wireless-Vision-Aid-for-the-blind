@@ -58,6 +58,19 @@ class CameraGUI:
         self.last_spoken_gui_text = ""
         self.gui_speech_cooldown = 0.25
         self.last_gui_speech_time = 0.0
+        self.default_focal_length_px = 700.0
+        self.known_object_width_m = {
+            "person": 0.45,
+            "car": 1.8,
+            "truck": 2.5,
+            "bus": 2.6,
+            "bicycle": 0.6,
+            "motorcycle": 0.8,
+            "chair": 0.5,
+            "door": 0.9,
+            "stop sign": 0.75,
+            "traffic light": 0.3,
+        }
 
         self.object_labels = {}
         self.multilingual_labels = self._load_multilingual_labels(self.labels_path)
@@ -282,9 +295,14 @@ class CameraGUI:
         return table.get(distance, distance)
 
     def _build_localized_object_phrase(self, object_name, direction, distance):
-        if self.language == "ru":
-            return f"{object_name} {self._localized_direction(direction)} {self._localized_distance(distance)}"
-        return f"{object_name} {self._localized_direction(direction)} {self._localized_distance(distance)}"
+        if isinstance(distance, tuple):
+            distance_label, distance_m = distance
+        else:
+            distance_label, distance_m = distance, None
+        text = f"{object_name} {self._localized_direction(direction)} {self._localized_distance(distance_label)}"
+        if distance_m is not None:
+            text = f"{text}, about {distance_m:.1f} meters"
+        return text
 
     def _overlay_safe_text(self, text):
         try:
@@ -503,15 +521,30 @@ class CameraGUI:
             return "right"
         return "in front"
 
-    def _object_distance(self, bbox, frame_w, frame_h):
+    def _estimate_distance_m(self, class_name, bbox):
+        object_width_m = self.known_object_width_m.get(class_name)
+        if object_width_m is None:
+            return None
+        bbox_width_px = max(float(bbox[2] - bbox[0]), 1.0)
+        distance_m = (object_width_m * self.default_focal_length_px) / bbox_width_px
+        return float(np.clip(distance_m, 0.2, 20.0))
+
+    def _object_distance(self, class_name, bbox, frame_w, frame_h):
         area = max((bbox[2] - bbox[0]) * (bbox[3] - bbox[1]), 1.0)
         frame_area = max(frame_w * frame_h, 1.0)
         ratio = area / frame_area
+        distance_m = self._estimate_distance_m(class_name, bbox)
+        if distance_m is not None:
+            if distance_m <= 1.0:
+                return "very close", distance_m
+            if distance_m <= 2.5:
+                return "close", distance_m
+            return "too far", distance_m
         if ratio > 0.3:
-            return "very close"
+            return "very close", None
         if ratio > 0.15:
-            return "close"
-        return "too far"
+            return "close", None
+        return "too far", None
 
     def _detect_real_objects(self, frame):
         if not self.ml_enabled or self.model is None:
@@ -533,15 +566,16 @@ class CameraGUI:
 
                 bbox = box.xyxy[0].cpu().numpy().astype(int)
                 direction = self._object_direction(bbox, frame_w)
-                distance = self._object_distance(bbox, frame_w, frame_h)
+                distance, distance_m = self._object_distance(class_name, bbox, frame_w, frame_h)
                 default_name = self.object_labels.get(
                     class_name, class_name.replace("_", " ").strip().title()
                 )
                 pretty_name = self.translate_class_name(class_name, default_name)
+                distance_suffix = f", {distance_m:.1f}m" if distance_m is not None else ""
 
                 label = (
                     f"{pretty_name} {conf:.2f} "
-                    f"{self._localized_direction(direction)} {self._localized_distance(distance)}"
+                    f"{self._localized_direction(direction)} {self._localized_distance(distance)}{distance_suffix}"
                 )
                 color = (0, 0, 255) if distance == "very close" else (0, 255, 0)
                 cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
@@ -553,19 +587,19 @@ class CameraGUI:
                     color,
                 )
 
-                detections.append((class_name, pretty_name, direction, distance, conf, bbox))
+                detections.append((class_name, pretty_name, direction, distance, conf, bbox, distance_m))
                 self.detected_counts[class_name] = self.detected_counts.get(class_name, 0) + 1
                 self.test_detected_types.add(class_name)
 
                 detection_key = f"{class_name}_{direction}_{distance}"
                 frame_keys.add(detection_key)
-                speech_candidates.append((conf, detection_key, pretty_name, direction, distance))
+                speech_candidates.append((conf, detection_key, pretty_name, direction, distance, distance_m))
 
         self.recent_detection_keys.append(frame_keys)
 
         spoken_this_frame = 0
         used_keys = set()
-        for conf, detection_key, pretty_name, direction, distance in sorted(
+        for conf, detection_key, pretty_name, direction, distance, distance_m in sorted(
             speech_candidates, key=lambda x: x[0], reverse=True
         ):
             if detection_key in used_keys:
@@ -682,7 +716,7 @@ class CameraGUI:
         frame, detections = self._detect_real_objects(frame)
         if detections:
             first = detections[0]
-            self.last_detect_text = self._build_localized_object_phrase(first[1], first[2], first[3])
+            self.last_detect_text = self._build_localized_object_phrase(first[1], first[2], (first[3], first[6]))
             self.maybe_speak_display_text(self.last_detect_text)
         else:
             self.last_detect_text = "No real objects yet"

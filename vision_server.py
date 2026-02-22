@@ -62,6 +62,19 @@ class VisionAidServer:
         self.min_stable_frames = 1
         self.recent_detection_keys = deque(maxlen=self.stability_window)
         self.model_imgsz = 416
+        self.default_focal_length_px = 700.0
+        self.known_object_width_m = {
+            "person": 0.45,
+            "car": 1.8,
+            "truck": 2.5,
+            "bus": 2.6,
+            "bicycle": 0.6,
+            "motorcycle": 0.8,
+            "chair": 0.5,
+            "door": 0.9,
+            "stop sign": 0.75,
+            "traffic light": 0.3,
+        }
         
         # Priority objects (most important for blind navigation)
         self.priority_objects = {
@@ -361,6 +374,34 @@ class VisionAidServer:
             return "right"
         else:
             return "in front"
+
+    def estimate_distance_m(self, class_name, bbox):
+        """Estimate object distance in meters using pinhole-camera approximation."""
+        object_width_m = self.known_object_width_m.get(class_name)
+        if object_width_m is None:
+            return None
+        bbox_width_px = max(float(bbox[2] - bbox[0]), 1.0)
+        distance_m = (object_width_m * self.default_focal_length_px) / bbox_width_px
+        return float(np.clip(distance_m, 0.2, 20.0))
+
+    def distance_bucket(self, distance_m, size_ratio):
+        """Map numeric distance to coarse proximity labels."""
+        if distance_m is not None:
+            if distance_m <= 1.0:
+                return "very close"
+            if distance_m <= 2.5:
+                return "close"
+            return "too far"
+        if size_ratio > 0.3:
+            return "very close"
+        if size_ratio > 0.15:
+            return "close"
+        return "too far"
+
+    def distance_text_for_speech(self, distance_m):
+        if distance_m is None:
+            return ""
+        return f"about {distance_m:.1f} meters"
     
     def process_detections(self, results, frame):
         """Process YOLO detection results and generate audio feedback"""
@@ -390,12 +431,8 @@ class VisionAidServer:
                 frame_area = frame_width * frame_height
                 size_ratio = bbox_area / frame_area
                 
-                if size_ratio > 0.3:
-                    distance = "very close"
-                elif size_ratio > 0.15:
-                    distance = "close"
-                else:
-                    distance = "too far"
+                distance_m = self.estimate_distance_m(class_name, bbox)
+                distance = self.distance_bucket(distance_m, size_ratio)
 
                 spoken_name = self.translate_class_name(class_name)
                 detection_info = {
@@ -404,6 +441,7 @@ class VisionAidServer:
                     'confidence': confidence,
                     'direction': direction,
                     'distance': distance,
+                    'distance_m': distance_m,
                     'bbox': bbox
                 }
                 detections.append(detection_info)
@@ -411,7 +449,7 @@ class VisionAidServer:
                 detection_key = f"{class_name}_{direction}_{distance}"
                 frame_keys.add(detection_key)
                 speech_candidates.append(
-                    (confidence, detection_key, spoken_name, direction, distance)
+                    (confidence, detection_key, spoken_name, direction, distance, distance_m)
                 )
 
         self.recent_detection_keys.append(frame_keys)
@@ -419,7 +457,7 @@ class VisionAidServer:
         # Speak only top confident stable objects to avoid audio flood.
         spoken_this_frame = 0
         used_keys = set()
-        for confidence, detection_key, spoken_name, direction, distance in sorted(
+        for confidence, detection_key, spoken_name, direction, distance, distance_m in sorted(
             speech_candidates, key=lambda x: x[0], reverse=True
         ):
             if detection_key in used_keys:
@@ -432,21 +470,13 @@ class VisionAidServer:
             if not self.should_announce(detection_key):
                 continue
 
-            if direction == "in front":
-                message = (
-                    f"{spoken_name} {self._localized_direction(direction)}, "
-                    f"{self._localized_distance(distance)}"
-                )
-            elif direction == "left":
-                message = (
-                    f"{spoken_name} {self._localized_direction(direction)}, "
-                    f"{self._localized_distance(distance)}"
-                )
-            else:
-                message = (
-                    f"{spoken_name} {self._localized_direction(direction)}, "
-                    f"{self._localized_distance(distance)}"
-                )
+            distance_text = self.distance_text_for_speech(distance_m)
+            message = (
+                f"{spoken_name} {self._localized_direction(direction)}, "
+                f"{self._localized_distance(distance)}"
+            )
+            if distance_text:
+                message = f"{message}, {distance_text}"
             if distance == "very close":
                 message = f"Warning. {message}"
             self.speak(message)
@@ -521,13 +551,15 @@ class VisionAidServer:
             class_name = det.get('label', det['class'])
             confidence = det['confidence']
             direction = det['direction']
+            distance_m = det.get("distance_m")
             
             # Draw bounding box
             color = (0, 255, 0) if det['distance'] != "very close" else (0, 0, 255)
             cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
             
             # Draw label
-            label = f"{class_name} {confidence:.2f} ({direction}, {det['distance']})"
+            distance_suffix = f", {distance_m:.1f}m" if distance_m is not None else ""
+            label = f"{class_name} {confidence:.2f} ({direction}, {det['distance']}{distance_suffix})"
             label = self._overlay_safe_text(label)
             cv2.putText(frame, label, (bbox[0], bbox[1] - 10),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
