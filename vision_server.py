@@ -1,21 +1,68 @@
-"""
-Wireless Vision-Aid for the Blind (WVAB) - Main Server
-This script receives video stream from ESP32-CAM via Wi-Fi and performs real-time object detection
-"""
+# --------------------------------------------------------------------------------------------- # 
+# | Name: Md. Shahanur Islam Shagor                                                           | # 
+# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
+# | Voronezh State University of Forestry and Technologies                                    | # 
+# | Build for Blind people within 15$                                                         | # 
+# --------------------------------------------------------------------------------------------- # 
+
+import os
+import time
+import json
+import queue
+import threading
+import threading as _threading
+import logging
+from logging.handlers import RotatingFileHandler
+import urllib.request
+import urllib.parse
+import subprocess
+import unicodedata
+from collections import deque
+import asyncio
 
 import cv2
 import numpy as np
-from ultralytics import YOLO
+from PIL import Image, ImageDraw, ImageFont
 import pyttsx3
-import threading
-import time
-from collections import deque
-import urllib.request
-import queue
-import os
-import subprocess
-import json
-import unicodedata
+
+from offline_utils import configure_offline_env, ensure_local_model
+from ultralytics import YOLO
+
+OFFLINE_MODE = configure_offline_env()
+
+def _env_flag(name, default="0"):
+    return str(os.environ.get(name, default)).strip().lower() not in ("0", "false", "no", "off", "")
+
+def _env_float(name, default):
+    try:
+        return float(os.environ.get(name, default))
+    except Exception:
+        return float(default)
+
+
+def _setup_logger():
+    log_path = os.environ.get("WVAB_LOG_PATH", "wvab_server.log")
+    level = os.environ.get("WVAB_LOG_LEVEL", "INFO").upper()
+    logger = logging.getLogger("wvab_server")
+    if logger.handlers:
+        return logger
+    logger.setLevel(getattr(logging, level, logging.INFO))
+    handler = RotatingFileHandler(log_path, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger
+
+try:
+    import websockets
+except Exception:
+    websockets = None
+try:
+    import paho.mqtt.client as mqtt
+except Exception:
+    mqtt = None
 
 class VisionAidServer:
     def __init__(
@@ -33,11 +80,20 @@ class VisionAidServer:
             model_path: Path to YOLO model (yolov8n.pt for nano, yolov8s.pt for small)
         """
         self.camera_url = camera_url
-        self.model = YOLO(model_path)
+        self.model = YOLO(ensure_local_model(model_path, offline=OFFLINE_MODE))
         self.language = language
         self.speech_language = self.language
         self.labels_path = labels_path
-        self.tts_engine = None
+        self.logger = _setup_logger()
+        self.prod_mode = _env_flag("WVAB_PROD", "0")
+        self.enable_display = _env_flag("WVAB_DISPLAY", "1") and not self.prod_mode
+        self.log_fps = _env_flag("WVAB_LOG_FPS", "1") and not self.prod_mode
+        self.tts_rate = int(os.environ.get("WVAB_TTS_RATE", "190"))
+        self.tts_stale_s = float(os.environ.get("WVAB_TTS_STALE_MS", "800")) / 1000.0
+        self.tts_flush_on_priority = os.environ.get("WVAB_TTS_FLUSH_ON_PRIORITY", "1") != "0"
+        self.tts_engine = pyttsx3.init()
+        self.tts_engine.setProperty("rate", self.tts_rate)
+        self.tts_engine.setProperty("volume", 1.0)
         self.cpp_speaker_path = self._find_cpp_speaker()
         self.speech_queue = queue.Queue(maxsize=1)
         self.speech_lock = threading.Lock()
@@ -61,7 +117,10 @@ class VisionAidServer:
         self.stability_window = 4
         self.min_stable_frames = 1
         self.recent_detection_keys = deque(maxlen=self.stability_window)
-        self.model_imgsz = 416
+        # Smaller input size to reduce latency for live use.
+        self.model_imgsz = 320
+        self.infer_width = 640
+        self.infer_height = 360
         self.default_focal_length_px = 700.0
         self.known_object_width_m = {
             "person": 0.45,
@@ -112,29 +171,82 @@ class VisionAidServer:
         self.available_languages = self._detect_available_languages(self.multilingual_labels)
         if self.language not in self.available_languages:
             self.language = "en"
+        self.overlay_font = self._load_overlay_font()
         self.speech_language = self._resolve_speech_language(self.language)
         self.navigation_phrases = {
             "STOP - obstacle very close": {
-                "en": "STOP obstacle very close",
-                "ru": "СТОП, препятствие очень близко",
+                "en": "Stop",
+                "ru": "СТОП",
+                "bn": "থামুন",
+                "hi": "रुकें",
+                "es": "Alto",
+                "fr": "Stop",
+                "ar": "توقف",
             },
             "GO LEFT": {
-                "en": "GO LEFT",
-                "ru": "ИДИТЕ НАЛЕВО",
+                "en": "Go left",
+                "ru": "НАЛЕВО",
+                "bn": "বামে যান",
+                "hi": "बाएं जाएं",
+                "es": "Izquierda",
+                "fr": "À gauche",
+                "ar": "يسار",
             },
             "GO RIGHT": {
-                "en": "GO RIGHT",
-                "ru": "ИДИТЕ НАПРАВО",
+                "en": "Go right",
+                "ru": "НАПРАВО",
+                "bn": "ডানে যান",
+                "hi": "दाएं जाएं",
+                "es": "Derecha",
+                "fr": "À droite",
+                "ar": "يمين",
             },
             "SLOW - path blocked ahead": {
-                "en": "SLOW DOWN, path blocked ahead",
-                "ru": "МЕДЛЕННЕЕ, путь впереди заблокирован",
+                "en": "Slow",
+                "ru": "МЕДЛЕННЕЕ",
+                "bn": "ধীরে",
+                "hi": "धीरे",
+                "es": "Despacio",
+                "fr": "Lent",
+                "ar": "ببطء",
             },
             "CLEAN AREA GO STRAIGHT": {
-                "en": "CLEAN AREA GO STRAIGHT",
-                "ru": "ПУТЬ СВОБОДЕН, ИДИТЕ ПРЯМО",
+                "en": "Go straight",
+                "ru": "ПРЯМО",
+                "bn": "সোজা যান",
+                "hi": "सीधे जाएं",
+                "es": "Recto",
+                "fr": "Tout droit",
+                "ar": "مستقيم",
             },
         }
+        self.system_phrases = {
+            "started": {
+                "en": "Vision aid started",
+                "ru": "Система запущена",
+                "bn": "সিস্টেম চালু",
+                "hi": "सिस्टम शुरू",
+                "es": "Sistema iniciado",
+                "fr": "Système démarré",
+                "ar": "تم تشغيل النظام",
+            },
+            "stopped": {
+                "en": "Vision aid stopped",
+                "ru": "Система остановлена",
+                "bn": "সিস্টেম বন্ধ",
+                "hi": "सिस्टम बंद",
+                "es": "Sistema detenido",
+                "fr": "Système arrêté",
+                "ar": "تم إيقاف النظام",
+            },
+        }
+        self.ws_control = None
+        if websockets is not None and os.environ.get("WVAB_WS", "1") != "0":
+            self.ws_control = WebSocketControl(self)
+        self.v2x_publisher = None
+        if mqtt is not None and os.environ.get("WVAB_MQTT", "0") == "1":
+            self.v2x_publisher = V2XPublisher()
+
 
     def _find_cpp_speaker(self):
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -189,7 +301,7 @@ class VisionAidServer:
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as exc:
-            print(f"Warning: could not load labels file '{path}': {exc}")
+            self.logger.exception("Could not load labels file '%s'", path)
             return {}
 
     def _detect_available_languages(self, labels):
@@ -218,6 +330,12 @@ class VisionAidServer:
             return mapping.get(self.language, mapping.get("en", instruction))
         return instruction
 
+    def translate_system(self, key):
+        mapping = self.system_phrases.get(key)
+        if isinstance(mapping, dict):
+            return mapping.get(self.language, mapping.get("en", key))
+        return key
+
     def _localized_direction(self, direction):
         phrases = self.multilingual_labels.get("__phrases__", {})
         if isinstance(phrases, dict):
@@ -227,8 +345,13 @@ class VisionAidServer:
                 if isinstance(maybe, str) and maybe.strip():
                     return maybe
         table = {
-            "en": {"left": "in left", "right": "in right", "in front": "in front"},
+            "en": {"left": "left", "right": "right", "in front": "ahead"},
             "ru": {"left": "слева", "right": "справа", "in front": "спереди"},
+            "bn": {"left": "বামে", "right": "ডানে", "in front": "সামনে"},
+            "hi": {"left": "बाएं", "right": "दाएं", "in front": "सामने"},
+            "es": {"left": "izquierda", "right": "derecha", "in front": "delante"},
+            "fr": {"left": "à gauche", "right": "à droite", "in front": "devant"},
+            "ar": {"left": "يسار", "right": "يمين", "in front": "أمام"},
         }
         return table.get(self.language, table["en"]).get(direction, direction)
 
@@ -241,8 +364,13 @@ class VisionAidServer:
                 if isinstance(maybe, str) and maybe.strip():
                     return maybe
         table = {
-            "en": {"too far": "too far", "close": "close", "very close": "very close"},
+            "en": {"too far": "far", "close": "close", "very close": "very close"},
             "ru": {"too far": "далеко", "close": "близко", "very close": "очень близко"},
+            "bn": {"too far": "দূরে", "close": "কাছে", "very close": "খুব কাছে"},
+            "hi": {"too far": "दूर", "close": "पास", "very close": "बहुत पास"},
+            "es": {"too far": "lejos", "close": "cerca", "very close": "muy cerca"},
+            "fr": {"too far": "loin", "close": "proche", "very close": "très proche"},
+            "ar": {"too far": "بعيد", "close": "قريب", "very close": "قريب جدًا"},
         }
         return table.get(self.language, table["en"]).get(distance, distance)
 
@@ -255,6 +383,71 @@ class VisionAidServer:
             ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
             return ascii_text if ascii_text.strip() else "object"
 
+    def _load_overlay_font(self):
+        env_path = os.environ.get("WVAB_FONT_PATH", "").strip()
+        font_candidates = []
+        if env_path:
+            font_candidates.append(env_path)
+
+        lang = (self.language or "en").lower()
+        if lang.startswith("bn"):
+            font_candidates += [
+                "C:/Windows/Fonts/Nirmala.ttf",
+                "C:/Windows/Fonts/kalpurush.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansBengaliUI-Regular.ttf",
+            ]
+        elif lang.startswith("hi"):
+            font_candidates += [
+                "C:/Windows/Fonts/Mangal.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+            ]
+        elif lang.startswith("ru"):
+            font_candidates += [
+                "C:/Windows/Fonts/arial.ttf",
+                "C:/Windows/Fonts/segoeui.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            ]
+        else:
+            font_candidates += [
+                "C:/Windows/Fonts/arial.ttf",
+                "C:/Windows/Fonts/seguiemj.ttf",
+                "C:/Windows/Fonts/segoeui.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            ]
+        for path in font_candidates:
+            if os.path.exists(path):
+                try:
+                    font = ImageFont.truetype(path, 18)
+                    self.logger.info("Overlay font loaded: %s", path)
+                    return font
+                except Exception:
+                    continue
+        try:
+            self.logger.warning("Overlay font not found; using default font.")
+            return ImageFont.load_default()
+        except Exception:
+            return None
+
+    def _draw_unicode_text(self, frame, text, x, y, color_bgr):
+        if self.overlay_font is None:
+            cv2.putText(
+                frame,
+                self._overlay_safe_text(text),
+                (x, y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color_bgr,
+                2,
+            )
+            return frame
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(rgb)
+        draw = ImageDraw.Draw(img)
+        color_rgb = (int(color_bgr[2]), int(color_bgr[1]), int(color_bgr[0]))
+        draw.text((x, y), text, font=self.overlay_font, fill=color_rgb)
+        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+
     def prettify_class_name(self, class_name):
         return class_name.replace("_", " ").strip().title()
 
@@ -266,23 +459,28 @@ class VisionAidServer:
                 break
 
             text = None
+            ts = 0.0
+            is_priority = False
             with self.speech_lock:
                 if self.priority_speech is not None:
-                    text = self.priority_speech
+                    text, ts = self.priority_speech
+                    is_priority = True
                     self.priority_speech = None
                 elif self.latest_speech is not None:
-                    text = self.latest_speech
+                    text, ts = self.latest_speech
                     self.latest_speech = None
                 self.speech_event.clear()
             if not text:
                 continue
             try:
-                self._speak_blocking(text)
+                if self.tts_stale_s > 0 and (time.time() - ts) > self.tts_stale_s:
+                    continue
+                self._speak_blocking(text, flush=is_priority)
                 self.last_spoken_text = text
-            except Exception as e:
-                print(f"TTS error: {e}")
+            except Exception:
+                self.logger.exception("TTS error")
 
-    def _speak_blocking(self, text):
+    def _speak_blocking(self, text, flush=False):
         if self.cpp_speaker_path and os.name == "nt" and self.speech_language == "en":
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             result = subprocess.run(
@@ -317,25 +515,34 @@ class VisionAidServer:
             if result.returncode == 0:
                 return
 
-        engine = pyttsx3.init()
-        engine.setProperty('rate', 190)
-        engine.setProperty('volume', 1.0)
-        engine.say(text)
-        engine.runAndWait()
-        engine.stop()
+        if flush:
+            try:
+                self.tts_engine.stop()
+            except Exception:
+                pass
+        self.tts_engine.say(text)
+        self.tts_engine.runAndWait()
 
     def speak(self, text):
         """Queue text-to-speech output (non-blocking)."""
         with self.speech_lock:
             self.priority_speech = None
-            self.latest_speech = text
+            self.latest_speech = (text, time.time())
             self.speech_event.set()
+        if self.ws_control is not None:
+            self.ws_control.publish_tts(text)
+        if self.v2x_publisher is not None:
+            self.v2x_publisher.publish_tts(text)
 
     def speak_priority(self, text):
         """Prioritize urgent navigation speech by clearing stale queue."""
         with self.speech_lock:
-            self.priority_speech = text
+            self.priority_speech = (text, time.time())
             self.speech_event.set()
+        if self.ws_control is not None:
+            self.ws_control.publish_tts(text)
+        if self.v2x_publisher is not None:
+            self.v2x_publisher.publish_tts(text)
 
     def stop_tts(self):
         """Stop the TTS worker cleanly."""
@@ -402,6 +609,19 @@ class VisionAidServer:
         if distance_m is None:
             return ""
         return f"about {distance_m:.1f} meters"
+
+    def _compact_speech_message(self, spoken_name, direction, distance):
+        dir_text = self._localized_direction(direction)
+        dist_text = self._localized_distance(distance)
+        parts = [spoken_name]
+        if dir_text:
+            parts.append(dir_text)
+        if distance in ("close", "very close"):
+            parts.append(dist_text)
+        message = " ".join(parts)
+        if distance == "very close":
+            message = f"Warning {message}"
+        return message
     
     def process_detections(self, results, frame):
         """Process YOLO detection results and generate audio feedback"""
@@ -470,16 +690,32 @@ class VisionAidServer:
             if not self.should_announce(detection_key):
                 continue
 
-            distance_text = self.distance_text_for_speech(distance_m)
-            message = (
-                f"{spoken_name} {self._localized_direction(direction)}, "
-                f"{self._localized_distance(distance)}"
-            )
-            if distance_text:
-                message = f"{message}, {distance_text}"
-            if distance == "very close":
-                message = f"Warning. {message}"
+            message = self._compact_speech_message(spoken_name, direction, distance)
             self.speak(message)
+            if self.ws_control is not None:
+                self.ws_control.publish_event(
+                    {
+                        "object": class_name,
+                        "label": spoken_name,
+                        "direction": direction,
+                        "distance": distance,
+                        "distance_m": distance_m,
+                        "confidence": float(confidence),
+                        "timestamp": time.time(),
+                    }
+                )
+            if self.v2x_publisher is not None:
+                self.v2x_publisher.publish_event(
+                    {
+                        "object": class_name,
+                        "label": spoken_name,
+                        "direction": direction,
+                        "distance": distance,
+                        "distance_m": distance_m,
+                        "confidence": float(confidence),
+                        "timestamp": time.time(),
+                    }
+                )
             spoken_this_frame += 1
         
         return detections
@@ -560,9 +796,7 @@ class VisionAidServer:
             # Draw label
             distance_suffix = f", {distance_m:.1f}m" if distance_m is not None else ""
             label = f"{class_name} {confidence:.2f} ({direction}, {det['distance']}{distance_suffix})"
-            label = self._overlay_safe_text(label)
-            cv2.putText(frame, label, (bbox[0], bbox[1] - 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            frame = self._draw_unicode_text(frame, label, bbox[0], bbox[1] - 10, color)
 
         if instruction:
             if severity == "danger":
@@ -571,15 +805,7 @@ class VisionAidServer:
                 nav_color = (0, 165, 255)
             else:
                 nav_color = (0, 255, 0)
-            cv2.putText(
-                frame,
-                f"NAV: {instruction}",
-                (10, 35),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.9,
-                nav_color,
-                3
-            )
+            frame = self._draw_unicode_text(frame, f"NAV: {instruction}", 10, 35, nav_color)
         
         return frame
     
@@ -602,7 +828,7 @@ class VisionAidServer:
             return
         
         print("Connected! Starting vision aid system...")
-        self.speak("Vision aid system started")
+        self.speak(self.translate_system("started"))
         self.running = True
         
         fps_counter = 0
@@ -615,8 +841,9 @@ class VisionAidServer:
                     print("Error: Failed to grab frame")
                     break
                 
-                # Run YOLO detection
-                results = self.model(frame, imgsz=self.model_imgsz, verbose=False)
+                # Downscale frame for faster inference
+                infer_frame = cv2.resize(frame, (self.infer_width, self.infer_height))
+                results = self.model(infer_frame, imgsz=self.model_imgsz, verbose=False)
                 
                 # Process detections and generate audio feedback
                 detections = self.process_detections(results, frame)
@@ -630,16 +857,17 @@ class VisionAidServer:
                 
                 # Calculate and display FPS
                 fps_counter += 1
-                if fps_counter % 30 == 0:
+                if self.log_fps and fps_counter % 30 == 0:
                     elapsed = time.time() - start_time
                     fps = fps_counter / elapsed
                     print(f"FPS: {fps:.2f} | Detections: {len(detections)}")
                 
                 # Display frame (comment out for headless operation)
-                cv2.imshow('WVAB - Vision Aid System', annotated_frame)
+                if self.enable_display:
+                    cv2.imshow('WVAB - Vision Aid System', annotated_frame)
                 
                 # Press 'q' to quit
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                if self.enable_display and cv2.waitKey(1) & 0xFF == ord('q'):
                     break
         
         except KeyboardInterrupt:
@@ -649,7 +877,7 @@ class VisionAidServer:
             self.running = False
             cap.release()
             cv2.destroyAllWindows()
-            self.speak("Vision aid system stopped")
+            self.speak(self.translate_system("stopped"))
             self.stop_tts()
     
     def run_with_mjpeg_stream(self):
@@ -659,11 +887,11 @@ class VisionAidServer:
         try:
             stream = urllib.request.urlopen(self.camera_url, timeout=10)
         except Exception as e:
-            print(f"Error connecting to camera: {e}")
+            self.logger.exception("Error connecting to camera")
             return
         
         print("Connected! Starting vision aid system...")
-        self.speak("Vision aid system started")
+        self.speak(self.translate_system("started"))
         self.running = True
         
         bytes_data = bytes()
@@ -685,8 +913,9 @@ class VisionAidServer:
                     frame = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
                     
                     if frame is not None:
-                        # Run YOLO detection
-                        results = self.model(frame, imgsz=self.model_imgsz, verbose=False)
+                        # Downscale frame for faster inference
+                        infer_frame = cv2.resize(frame, (self.infer_width, self.infer_height))
+                        results = self.model(infer_frame, imgsz=self.model_imgsz, verbose=False)
                         
                         # Process detections
                         detections = self.process_detections(results, frame)
@@ -702,29 +931,191 @@ class VisionAidServer:
                         
                         # Calculate FPS
                         fps_counter += 1
-                        if fps_counter % 30 == 0:
+                        if self.log_fps and fps_counter % 30 == 0:
                             elapsed = time.time() - start_time
                             fps = fps_counter / elapsed
                             print(f"FPS: {fps:.2f} | Detections: {len(detections)}")
                         
-                        # Display frame
-                        cv2.imshow('WVAB - Vision Aid System', annotated_frame)
+                        # Display frame (optional for production)
+                        if self.enable_display:
+                            cv2.imshow('WVAB - Vision Aid System', annotated_frame)
                         
-                        if cv2.waitKey(1) & 0xFF == ord('q'):
+                        if self.enable_display and cv2.waitKey(1) & 0xFF == ord('q'):
                             break
         
         except KeyboardInterrupt:
             print("\nStopping vision aid system...")
         
         except Exception as e:
-            print(f"Error in stream processing: {e}")
+            self.logger.exception("Error in stream processing")
         
         finally:
             self.running = False
             stream.close()
             cv2.destroyAllWindows()
-            self.speak("Vision aid system stopped")
+            self.speak(self.translate_system("stopped"))
             self.stop_tts()
+
+
+class WebSocketControl:
+    """
+    Lightweight WebSocket control/feedback channel.
+    Commands:
+      {"cmd":"set_language","value":"bn"}
+      {"cmd":"set_all_objects","value":true}
+      {"cmd":"set_confidence","value":0.4}
+    """
+
+    def __init__(self, server, host="0.0.0.0", port=8765):
+        self.server = server
+        self.host = host
+        self.port = port
+        self.clients = set()
+        self.auth_token = os.environ.get("WVAB_WS_TOKEN", "").strip()
+        self.queue = queue.Queue(maxsize=200)
+        self.last_event_time = {}
+        self.last_tts_time = 0.0
+        self.last_event_key = None
+        self.event_min_interval = float(os.environ.get("WVAB_WS_EVENT_MS", "150")) / 1000.0
+        self.tts_min_interval = float(os.environ.get("WVAB_WS_TTS_MS", "120")) / 1000.0
+        self.drop_duplicates = os.environ.get("WVAB_WS_DROP_DUP", "1") != "0"
+        self.max_queue = 200
+        self.loop = asyncio.new_event_loop()
+        self.thread = _threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def publish_tts(self, text):
+        now = time.time()
+        if now - self.last_tts_time < self.tts_min_interval:
+            return
+        self.last_tts_time = now
+        payload = json.dumps({"type": "tts", "text": text}, ensure_ascii=False)
+        try:
+            if self.queue.qsize() >= self.max_queue:
+                return
+            self.queue.put_nowait(payload)
+        except Exception:
+            pass
+    def publish_event(self, event):
+        key = f"{event.get('object')}|{event.get('direction')}|{event.get('distance')}"
+        now = time.time()
+        last = self.last_event_time.get(key, 0.0)
+        if now - last < self.event_min_interval:
+            return
+        if self.drop_duplicates and self.last_event_key == key:
+            return
+        self.last_event_time[key] = now
+        self.last_event_key = key
+        payload = json.dumps({"type": "detection", **event}, ensure_ascii=False)
+        try:
+            if self.queue.qsize() >= self.max_queue:
+                return
+            self.queue.put_nowait(payload)
+        except Exception:
+            pass
+
+    async def _sender(self):
+        while True:
+            text = await self.loop.run_in_executor(None, self.queue.get)
+            if not text:
+                continue
+            dead = []
+            for ws in list(self.clients):
+                try:
+                    await ws.send(text)
+                except Exception:
+                    dead.append(ws)
+            for ws in dead:
+                self.clients.discard(ws)
+
+    def _is_authenticated(self, websocket):
+        if not self.auth_token:
+            return True
+        token = ""
+        try:
+            headers = getattr(websocket, "request_headers", {}) or {}
+            auth_header = headers.get("Authorization", "")
+            if auth_header.lower().startswith("bearer "):
+                token = auth_header.split(" ", 1)[1].strip()
+        except Exception:
+            token = ""
+        if not token:
+            try:
+                path = getattr(websocket, "path", "")
+                qs = urllib.parse.urlparse(path).query
+                params = urllib.parse.parse_qs(qs)
+                token = (params.get("token", [""]) or [""])[0].strip()
+            except Exception:
+                token = ""
+        return token == self.auth_token
+
+    async def _handler(self, websocket):
+        if not self._is_authenticated(websocket):
+            try:
+                await websocket.close(code=1008, reason="Unauthorized")
+            except Exception:
+                pass
+            return
+        self.clients.add(websocket)
+        try:
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                except Exception:
+                    continue
+                cmd = data.get("cmd")
+                if cmd == "set_language":
+                    self.server.set_language(data.get("value", "en"))
+                elif cmd == "set_all_objects":
+                    self.server.detect_all_objects = bool(data.get("value", True))
+                elif cmd == "set_confidence":
+                    try:
+                        self.server.confidence_threshold = float(data.get("value", 0.5))
+                    except Exception:
+                        pass
+        finally:
+            self.clients.discard(websocket)
+
+    def _run(self):
+        asyncio.set_event_loop(self.loop)
+        start_server = websockets.serve(self._handler, self.host, self.port)
+        self.loop.run_until_complete(start_server)
+        self.loop.create_task(self._sender())
+        self.loop.run_forever()
+
+
+class V2XPublisher:
+    """
+    MQTT publisher for V2X/audit events.
+    Set env:
+      WVAB_MQTT=1
+      WVAB_MQTT_HOST (default localhost)
+      WVAB_MQTT_PORT (default 1883)
+      WVAB_MQTT_TOPIC (default wvab/v2x/detection)
+    """
+
+    def __init__(self):
+        self.host = os.environ.get("WVAB_MQTT_HOST", "localhost")
+        self.port = int(os.environ.get("WVAB_MQTT_PORT", "1883"))
+        self.topic = os.environ.get("WVAB_MQTT_TOPIC", "wvab/v2x/detection")
+        self.tts_topic = os.environ.get("WVAB_MQTT_TTS_TOPIC", "wvab/v2x/tts")
+        self.client = mqtt.Client()
+        self.client.connect(self.host, self.port, 60)
+        self.client.loop_start()
+
+    def publish_event(self, event):
+        payload = json.dumps({"type": "detection", **event}, ensure_ascii=False)
+        try:
+            self.client.publish(self.topic, payload, qos=0)
+        except Exception:
+            pass
+
+    def publish_tts(self, text):
+        payload = json.dumps({"type": "tts", "text": text}, ensure_ascii=False)
+        try:
+            self.client.publish(self.tts_topic, payload, qos=0)
+        except Exception:
+            pass
 
 
 def detect_languages_from_labels_file(path):
@@ -752,7 +1143,7 @@ def main():
     CAMERA_URL = "http://192.168.4.1:81/stream"  # ESP32-CAM default
     # Alternative for IP Camera app: "http://192.168.1.100:8080/video"
     
-    MODEL_PATH = "yolov8n.pt"  # Nano model (fastest)
+    MODEL_PATH = os.environ.get("WVAB_MODEL", "yolov8n.pt")  # Nano model (fastest)
     # Alternatives: "yolov8s.pt" (small), "yolov8m.pt" (medium)
     
     print("=" * 50)
@@ -779,12 +1170,16 @@ def main():
     language = available_languages[lang_idx]
     
     # Initialize server
-    server = VisionAidServer(
-        camera_url=CAMERA_URL,
-        model_path=MODEL_PATH,
-        language=language,
-        labels_path=labels_path,
-    )
+    try:
+        server = VisionAidServer(
+            camera_url=CAMERA_URL,
+            model_path=MODEL_PATH,
+            language=language,
+            labels_path=labels_path,
+        )
+    except FileNotFoundError as exc:
+        print(f"Model error: {exc}")
+        return
     
     # Choose stream type based on camera
     print("\nSelect stream type:")

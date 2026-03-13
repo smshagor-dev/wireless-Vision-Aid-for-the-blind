@@ -1,6 +1,9 @@
-"""
-WVAB system testing and diagnostics utility.
-"""
+# --------------------------------------------------------------------------------------------- # 
+# | Name: Md. Shahanur Islam Shagor                                                           | # 
+# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
+# | Voronezh State University of Forestry and Technologies                                    | # 
+# | Build for Blind people within 15$                                                         | # 
+# --------------------------------------------------------------------------------------------- # 
 
 import sys
 import socket
@@ -9,7 +12,10 @@ import os
 import json
 import cv2
 import numpy as np
+from offline_utils import configure_offline_env, ensure_local_model
 
+OFFLINE_MODE = configure_offline_env()
+NONINTERACTIVE = os.environ.get("WVAB_TEST_NONINTERACTIVE", "0") == "1"
 
 class WVABTester:
     """Comprehensive testing utility for WVAB system."""
@@ -85,8 +91,8 @@ class WVABTester:
 
             self.print_result("Ultralytics Import", True)
             try:
-                print("Downloading/Loading YOLOv8 model...")
-                model = YOLO("yolov8n.pt")
+                print("Loading YOLOv8 model (offline)...")
+                model = YOLO(ensure_local_model("yolov8n.pt", offline=OFFLINE_MODE))
                 self.print_result("YOLO Model Load", True, "yolov8n.pt loaded successfully")
 
                 dummy_image = np.zeros((640, 480, 3), dtype=np.uint8)
@@ -113,7 +119,9 @@ class WVABTester:
                 print("Testing audio output (you should hear 'Test')...")
                 engine.say("Test")
                 engine.runAndWait()
-
+                if NONINTERACTIVE:
+                    self.print_result("Audio Output", True, "Skipped (non-interactive)")
+                    return True
                 user_input = input("Did you hear the audio? (y/n): ").strip().lower()
                 heard_audio = user_input == "y"
                 self.print_result("Audio Output", heard_audio)
@@ -136,6 +144,34 @@ class WVABTester:
             return True
         except Exception:
             self.print_result("Network Connection", False, "No network connection")
+            return False
+
+    def test_udp_security_primitives(self):
+        self.print_header("Testing UDP Security Primitives")
+        try:
+            from udp_streaming import _validate_aes_key
+        except Exception as e:
+            self.print_result("UDP Import", False, str(e))
+            return False
+
+        try:
+            _validate_aes_key(b"\x00" * 16)
+            _validate_aes_key(b"\x00" * 24)
+            _validate_aes_key(b"\x00" * 32)
+            self.print_result("AES Key Lengths", True, "16/24/32 bytes accepted")
+        except Exception as e:
+            self.print_result("AES Key Lengths", False, str(e))
+            return False
+
+        try:
+            _validate_aes_key(b"\x00" * 10)
+            self.print_result("AES Invalid Length", False, "Invalid length accepted")
+            return False
+        except ValueError:
+            self.print_result("AES Invalid Length", True, "Invalid length rejected")
+            return True
+        except Exception as e:
+            self.print_result("AES Invalid Length", False, str(e))
             return False
 
     def test_camera_connection(self, camera_url):
@@ -287,7 +323,7 @@ class WVABTester:
             import pyttsx3
 
             print("Initializing components...")
-            model = YOLO("yolov8n.pt")
+            model = YOLO(ensure_local_model("yolov8n.pt", offline=OFFLINE_MODE))
             pyttsx3.init()
             cap = cv2.VideoCapture(camera_source)
 
@@ -443,17 +479,23 @@ def main():
     print("\n[4/7] Testing Text-to-Speech...")
     tester.test_pyttsx3()
 
-    print("\n[5/7] Testing Network...")
+    print("\n[5/8] Testing Network...")
     tester.test_network()
 
-    print("\n[6/7] Testing Camera...")
+    print("\n[6/8] Testing UDP Security...")
+    tester.test_udp_security_primitives()
+
+    print("\n[7/8] Testing Camera...")
     print("\nSelect camera type:")
     print("1. PC webcam GUI (real + ML, stays ON until close)")
     print("2. ESP32-CAM (192.168.4.1)")
     print("3. IP Camera (custom URL)")
     print("4. Skip camera test")
 
-    choice = input("\nEnter choice (1-4): ").strip()
+    if NONINTERACTIVE:
+        choice = "4"
+    else:
+        choice = input("\nEnter choice (1-4): ").strip()
     url = ""
     labels_path = "multilingual_labels.common.json"
 
@@ -479,10 +521,10 @@ def main():
     else:
         print("Skipping camera test")
 
-    print("\n[7/7] Testing Complete Pipeline...")
+    print("\n[8/8] Testing Complete Pipeline...")
     if choice == "1":
         print("Skipping separate pipeline test: GUI mode already runs real-time ML detection.")
-    elif choice in ["2", "3"] and input("Run pipeline test? (y/n): ").strip().lower() == "y":
+    elif choice in ["2", "3"] and (not NONINTERACTIVE and input("Run pipeline test? (y/n): ").strip().lower() == "y"):
         if choice == "2":
             tester.test_complete_pipeline("http://192.168.4.1:81/stream")
         elif choice == "3":

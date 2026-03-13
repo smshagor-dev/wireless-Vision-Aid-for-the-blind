@@ -1,3 +1,10 @@
+// # --------------------------------------------------------------------------------------------- # 
+// # | Name: Md. Shahanur Islam Shagor                                                           | # 
+// # | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
+// # | Voronezh State University of Forestry and Technologies                                    | # 
+// # | Build for Blind people within 15$                                                         | # 
+// # --------------------------------------------------------------------------------------------- # 
+
 #include "navigation_planner.h"
 
 #include <algorithm>

@@ -5,19 +5,21 @@
 # | Build for Blind people within 15$                                                         | # 
 # --------------------------------------------------------------------------------------------- # 
 
-cmake_minimum_required(VERSION 3.12)
-project(wvab_navigation_planner CXX)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+from navigation.a_star import a_star
+from navigation.trajectory import shortcut_path, smooth_path
 
-add_library(navigation_planner navigation_planner.cpp)
-target_include_directories(navigation_planner PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_executable(navigation_demo main_demo.cpp)
-target_link_libraries(navigation_demo PRIVATE navigation_planner)
+class PathPlanner:
+    def __init__(self, allow_diagonal=True, smooth=True):
+        self.allow_diagonal = allow_diagonal
+        self.smooth = smooth
 
-if(WIN32)
-  add_executable(wvab_speaker speaker_cli.cpp)
-  target_link_libraries(wvab_speaker PRIVATE ole32 sapi)
-endif()
+    def plan(self, grid, start, goal):
+        raw = a_star(grid, start, goal, allow_diagonal=self.allow_diagonal)
+        if not raw:
+            return []
+        if self.smooth:
+            raw = shortcut_path(grid, raw)
+            raw = smooth_path(raw, window=2)
+        return raw

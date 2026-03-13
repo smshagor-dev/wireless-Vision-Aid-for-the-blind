@@ -1,5 +1,9 @@
-# WVAB Project Requirements
-# Install with: pip install -r requirements.txt --break-system-packages
+# --------------------------------------------------------------------------------------------- # 
+# | Name: Md. Shahanur Islam Shagor                                                           | # 
+# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
+# | Voronezh State University of Forestry and Technologies                                    | # 
+# | Build for Blind people within 15$                                                         | # 
+# --------------------------------------------------------------------------------------------- # 
 
 # Computer Vision and Machine Learning
 opencv-python
@@ -18,3 +22,14 @@ requests
 
 # Utilities
 Pillow
+pyyaml
+psutil
+
+# Security / Realtime Control
+pycryptodome
+websockets
+paho-mqtt
+
+# Accelerated Inference (Intel)
+openvino
+prometheus-client

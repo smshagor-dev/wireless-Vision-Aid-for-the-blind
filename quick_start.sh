@@ -1,13 +1,16 @@
+# --------------------------------------------------------------------------------------------- # 
+# | Name: Md. Shahanur Islam Shagor                                                           | # 
+# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
+# | Voronezh State University of Forestry and Technologies                                    | # 
+# | Build for Blind people within 15$                                                         | # 
+# --------------------------------------------------------------------------------------------- # 
+
 #!/usr/bin/env bash
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="${ROOT_DIR}/.venv"
-
-PYTHON_BIN="python3"
-if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
-  PYTHON_BIN="python"
-fi
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+VENV_DIR="${VENV_DIR:-${ROOT_DIR}/.venv}"
 
 if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
   echo "Python not found. Install Python 3.8+ first."

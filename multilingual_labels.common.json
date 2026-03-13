@@ -1,10 +1,10 @@
 {
   "__phrases__": {
     "en": {
-      "left": "in left",
-      "right": "in right",
-      "in front": "in front",
-      "too far": "too far",
+      "left": "left",
+      "right": "right",
+      "in front": "ahead",
+      "too far": "far",
       "close": "close",
       "very close": "very close"
     },
@@ -15,88 +15,784 @@
       "too far": "далеко",
       "close": "близко",
       "very close": "очень близко"
+    },
+    "bn": {
+      "left": "বামে",
+      "right": "ডানে",
+      "in front": "সামনে",
+      "too far": "দূরে",
+      "close": "কাছে",
+      "very close": "খুব কাছে"
+    },
+    "hi": {
+      "left": "बाएं",
+      "right": "दाएं",
+      "in front": "सामने",
+      "too far": "दूर",
+      "close": "पास",
+      "very close": "बहुत पास"
+    },
+    "es": {
+      "left": "izquierda",
+      "right": "derecha",
+      "in front": "delante",
+      "too far": "lejos",
+      "close": "cerca",
+      "very close": "muy cerca"
+    },
+    "fr": {
+      "left": "à gauche",
+      "right": "à droite",
+      "in front": "devant",
+      "too far": "loin",
+      "close": "proche",
+      "very close": "très proche"
+    },
+    "ar": {
+      "left": "يسار",
+      "right": "يمين",
+      "in front": "أمام",
+      "too far": "بعيد",
+      "close": "قريب",
+      "very close": "قريب جدًا"
     }
   },
-  "person": {"en": "Person", "ru": "Человек"},
-  "bicycle": {"en": "Bicycle", "ru": "Велосипед"},
-  "car": {"en": "Car", "ru": "Машина"},
-  "motorcycle": {"en": "Motorcycle", "ru": "Мотоцикл"},
-  "airplane": {"en": "Airplane", "ru": "Самолет"},
-  "bus": {"en": "Bus", "ru": "Автобус"},
-  "train": {"en": "Train", "ru": "Поезд"},
-  "truck": {"en": "Truck", "ru": "Грузовик"},
-  "boat": {"en": "Boat", "ru": "Лодка"},
-  "traffic light": {"en": "Traffic light", "ru": "Светофор"},
-  "fire hydrant": {"en": "Fire hydrant", "ru": "Пожарный гидрант"},
-  "stop sign": {"en": "Stop sign", "ru": "Знак стоп"},
-  "parking meter": {"en": "Parking meter", "ru": "Парковочный счетчик"},
-  "bench": {"en": "Bench", "ru": "Скамейка"},
-  "bird": {"en": "Bird", "ru": "Птица"},
-  "cat": {"en": "Cat", "ru": "Кошка"},
-  "dog": {"en": "Dog", "ru": "Собака"},
-  "horse": {"en": "Horse", "ru": "Лошадь"},
-  "sheep": {"en": "Sheep", "ru": "Овца"},
-  "cow": {"en": "Cow", "ru": "Корова"},
-  "elephant": {"en": "Elephant", "ru": "Слон"},
-  "bear": {"en": "Bear", "ru": "Медведь"},
-  "zebra": {"en": "Zebra", "ru": "Зебра"},
-  "giraffe": {"en": "Giraffe", "ru": "Жираф"},
-  "backpack": {"en": "Backpack", "ru": "Рюкзак"},
-  "umbrella": {"en": "Umbrella", "ru": "Зонт"},
-  "handbag": {"en": "Handbag", "ru": "Сумка"},
-  "tie": {"en": "Tie", "ru": "Галстук"},
-  "suitcase": {"en": "Suitcase", "ru": "Чемодан"},
-  "frisbee": {"en": "Frisbee", "ru": "Фрисби"},
-  "skis": {"en": "Skis", "ru": "Лыжи"},
-  "snowboard": {"en": "Snowboard", "ru": "Сноуборд"},
-  "sports ball": {"en": "Sports ball", "ru": "Мяч"},
-  "kite": {"en": "Kite", "ru": "Воздушный змей"},
-  "baseball bat": {"en": "Baseball bat", "ru": "Бейсбольная бита"},
-  "baseball glove": {"en": "Baseball glove", "ru": "Бейсбольная перчатка"},
-  "skateboard": {"en": "Skateboard", "ru": "Скейтборд"},
-  "surfboard": {"en": "Surfboard", "ru": "Серфборд"},
-  "tennis racket": {"en": "Tennis racket", "ru": "Теннисная ракетка"},
-  "bottle": {"en": "Bottle", "ru": "Бутылка"},
-  "wine glass": {"en": "Wine glass", "ru": "Бокал"},
-  "cup": {"en": "Cup", "ru": "Чашка"},
-  "fork": {"en": "Fork", "ru": "Вилка"},
-  "knife": {"en": "Knife", "ru": "Нож"},
-  "spoon": {"en": "Spoon", "ru": "Ложка"},
-  "bowl": {"en": "Bowl", "ru": "Миска"},
-  "banana": {"en": "Banana", "ru": "Банан"},
-  "apple": {"en": "Apple", "ru": "Яблоко"},
-  "sandwich": {"en": "Sandwich", "ru": "Сэндвич"},
-  "orange": {"en": "Orange", "ru": "Апельсин"},
-  "broccoli": {"en": "Broccoli", "ru": "Брокколи"},
-  "carrot": {"en": "Carrot", "ru": "Морковь"},
-  "hot dog": {"en": "Hot dog", "ru": "Хот-дог"},
-  "pizza": {"en": "Pizza", "ru": "Пицца"},
-  "donut": {"en": "Donut", "ru": "Пончик"},
-  "cake": {"en": "Cake", "ru": "Торт"},
-  "chair": {"en": "Chair", "ru": "Стул"},
-  "couch": {"en": "Couch", "ru": "Диван"},
-  "potted plant": {"en": "Potted plant", "ru": "Растение в горшке"},
-  "bed": {"en": "Bed", "ru": "Кровать"},
-  "dining table": {"en": "Dining table", "ru": "Обеденный стол"},
-  "toilet": {"en": "Toilet", "ru": "Туалет"},
-  "tv": {"en": "TV", "ru": "Телевизор"},
-  "laptop": {"en": "Laptop", "ru": "Ноутбук"},
-  "mouse": {"en": "Mouse", "ru": "Мышь"},
-  "remote": {"en": "Remote", "ru": "Пульт"},
-  "keyboard": {"en": "Keyboard", "ru": "Клавиатура"},
-  "cell phone": {"en": "Cell phone", "ru": "Телефон"},
-  "microwave": {"en": "Microwave", "ru": "Микроволновка"},
-  "oven": {"en": "Oven", "ru": "Духовка"},
-  "toaster": {"en": "Toaster", "ru": "Тостер"},
-  "sink": {"en": "Sink", "ru": "Раковина"},
-  "refrigerator": {"en": "Refrigerator", "ru": "Холодильник"},
-  "book": {"en": "Book", "ru": "Книга"},
-  "clock": {"en": "Clock", "ru": "Часы"},
-  "vase": {"en": "Vase", "ru": "Ваза"},
-  "scissors": {"en": "Scissors", "ru": "Ножницы"},
-  "teddy bear": {"en": "Teddy bear", "ru": "Плюшевый мишка"},
-  "hair drier": {"en": "Hair drier", "ru": "Фен"},
-  "toothbrush": {"en": "Toothbrush", "ru": "Зубная щетка"},
-  "door": {"en": "Door", "ru": "Дверь"},
-  "stairs": {"en": "Stairs", "ru": "Лестница"}
+  "person": {
+    "en": "Person",
+    "ru": "Человек",
+    "bn": "ব্যক্তি",
+    "hi": "व्यक्ति",
+    "es": "persona",
+    "fr": "personne",
+    "ar": "شخص"
+  },
+  "bicycle": {
+    "en": "Bicycle",
+    "ru": "Велосипед",
+    "bn": "সাইকেল",
+    "hi": "साइकिल",
+    "es": "bicicleta",
+    "fr": "vélo",
+    "ar": "دراجة"
+  },
+  "car": {
+    "en": "Car",
+    "ru": "Машина",
+    "bn": "গাড়ি",
+    "hi": "कार",
+    "es": "coche",
+    "fr": "voiture",
+    "ar": "سيارة"
+  },
+  "motorcycle": {
+    "en": "Motorcycle",
+    "ru": "Мотоцикл",
+    "bn": "মোটরসাইকেল",
+    "hi": "मोटरसाइकिल",
+    "es": "motocicleta",
+    "fr": "moto",
+    "ar": "دراجة نارية"
+  },
+  "airplane": {
+    "en": "Airplane",
+    "ru": "Самолет",
+    "bn": "বিমান",
+    "hi": "विमान",
+    "es": "avión",
+    "fr": "avion",
+    "ar": "طائرة"
+  },
+  "bus": {
+    "en": "Bus",
+    "ru": "Автобус",
+    "bn": "বাস",
+    "hi": "बस",
+    "es": "autobús",
+    "fr": "bus",
+    "ar": "حافلة"
+  },
+  "train": {
+    "en": "Train",
+    "ru": "Поезд",
+    "bn": "ট্রেন",
+    "hi": "ट्रेन",
+    "es": "tren",
+    "fr": "train",
+    "ar": "قطار"
+  },
+  "truck": {
+    "en": "Truck",
+    "ru": "Грузовик",
+    "bn": "ট্রাক",
+    "hi": "ट्रक",
+    "es": "camión",
+    "fr": "camion",
+    "ar": "شاحنة"
+  },
+  "boat": {
+    "en": "Boat",
+    "ru": "Лодка",
+    "bn": "নৌকা",
+    "hi": "नाव",
+    "es": "barco",
+    "fr": "bateau",
+    "ar": "قارب"
+  },
+  "traffic light": {
+    "en": "Traffic light",
+    "ru": "Светофор",
+    "bn": "ট্রাফিক লাইট",
+    "hi": "ट्रैफिक लाइट",
+    "es": "semáforo",
+    "fr": "feu de circulation",
+    "ar": "إشارة مرور"
+  },
+  "fire hydrant": {
+    "en": "Fire hydrant",
+    "ru": "Пожарный гидрант",
+    "bn": "ফায়ার হাইড্র্যান্ট",
+    "hi": "फायर हाइड्रेंट",
+    "es": "hidrante",
+    "fr": "bouche d'incendie",
+    "ar": "صنبور إطفاء"
+  },
+  "stop sign": {
+    "en": "Stop sign",
+    "ru": "Знак стоп",
+    "bn": "স্টপ সাইন",
+    "hi": "स्टॉप साइन",
+    "es": "señal de stop",
+    "fr": "panneau stop",
+    "ar": "علامة توقف"
+  },
+  "parking meter": {
+    "en": "Parking meter",
+    "ru": "Парковочный счетчик",
+    "bn": "পার্কিং মিটার",
+    "hi": "पार्किंग मीटर",
+    "es": "parquímetro",
+    "fr": "parcmètre",
+    "ar": "عداد مواقف"
+  },
+  "bench": {
+    "en": "Bench",
+    "ru": "Скамейка",
+    "bn": "বেঞ্চ",
+    "hi": "बेंच",
+    "es": "banco",
+    "fr": "banc",
+    "ar": "مقعد"
+  },
+  "bird": {
+    "en": "Bird",
+    "ru": "Птица",
+    "bn": "পাখি",
+    "hi": "पक्षी",
+    "es": "pájaro",
+    "fr": "oiseau",
+    "ar": "طائر"
+  },
+  "cat": {
+    "en": "Cat",
+    "ru": "Кошка",
+    "bn": "বিড়াল",
+    "hi": "बिल्ली",
+    "es": "gato",
+    "fr": "chat",
+    "ar": "قطة"
+  },
+  "dog": {
+    "en": "Dog",
+    "ru": "Собака",
+    "bn": "কুকুর",
+    "hi": "कुत्ता",
+    "es": "perro",
+    "fr": "chien",
+    "ar": "كلب"
+  },
+  "horse": {
+    "en": "Horse",
+    "ru": "Лошадь",
+    "bn": "ঘোড়া",
+    "hi": "घोड़ा",
+    "es": "caballo",
+    "fr": "cheval",
+    "ar": "حصان"
+  },
+  "sheep": {
+    "en": "Sheep",
+    "ru": "Овца",
+    "bn": "ভেড়া",
+    "hi": "भेड़",
+    "es": "oveja",
+    "fr": "mouton",
+    "ar": "خروف"
+  },
+  "cow": {
+    "en": "Cow",
+    "ru": "Корова",
+    "bn": "গরু",
+    "hi": "गाय",
+    "es": "vaca",
+    "fr": "vache",
+    "ar": "بقرة"
+  },
+  "elephant": {
+    "en": "Elephant",
+    "ru": "Слон",
+    "bn": "হাতি",
+    "hi": "हाथी",
+    "es": "elefante",
+    "fr": "éléphant",
+    "ar": "فيل"
+  },
+  "bear": {
+    "en": "Bear",
+    "ru": "Медведь",
+    "bn": "ভালুক",
+    "hi": "भालू",
+    "es": "oso",
+    "fr": "ours",
+    "ar": "دب"
+  },
+  "zebra": {
+    "en": "Zebra",
+    "ru": "Зебра",
+    "bn": "জেব্রা",
+    "hi": "ज़ेब्रा",
+    "es": "cebra",
+    "fr": "zèbre",
+    "ar": "حمار وحشي"
+  },
+  "giraffe": {
+    "en": "Giraffe",
+    "ru": "Жираф",
+    "bn": "জিরাফ",
+    "hi": "जिराफ",
+    "es": "jirafa",
+    "fr": "girafe",
+    "ar": "زرافة"
+  },
+  "backpack": {
+    "en": "Backpack",
+    "ru": "Рюкзак",
+    "bn": "ব্যাকপ্যাক",
+    "hi": "बैकपैक",
+    "es": "mochila",
+    "fr": "sac à dos",
+    "ar": "حقيبة ظهر"
+  },
+  "umbrella": {
+    "en": "Umbrella",
+    "ru": "Зонт",
+    "bn": "ছাতা",
+    "hi": "छाता",
+    "es": "paraguas",
+    "fr": "parapluie",
+    "ar": "مظلة"
+  },
+  "handbag": {
+    "en": "Handbag",
+    "ru": "Сумка",
+    "bn": "হ্যান্ডব্যাগ",
+    "hi": "हैंडबैग",
+    "es": "bolso",
+    "fr": "sac à main",
+    "ar": "حقيبة يد"
+  },
+  "tie": {
+    "en": "Tie",
+    "ru": "Галстук",
+    "bn": "টাই",
+    "hi": "टाई",
+    "es": "corbata",
+    "fr": "cravate",
+    "ar": "ربطة عنق"
+  },
+  "suitcase": {
+    "en": "Suitcase",
+    "ru": "Чемодан",
+    "bn": "স্যুটকেস",
+    "hi": "सूटकेस",
+    "es": "maleta",
+    "fr": "valise",
+    "ar": "حقيبة سفر"
+  },
+  "frisbee": {
+    "en": "Frisbee",
+    "ru": "Фрисби",
+    "bn": "ফ্রিসবি",
+    "hi": "फ्रिस्बी",
+    "es": "frisbee",
+    "fr": "frisbee",
+    "ar": "فريسبي"
+  },
+  "skis": {
+    "en": "Skis",
+    "ru": "Лыжи",
+    "bn": "স্কি",
+    "hi": "स्की",
+    "es": "esquís",
+    "fr": "skis",
+    "ar": "زلاجات"
+  },
+  "snowboard": {
+    "en": "Snowboard",
+    "ru": "Сноуборд",
+    "bn": "স্নোবোর্ড",
+    "hi": "स्नोबोर्ड",
+    "es": "tabla de snowboard",
+    "fr": "snowboard",
+    "ar": "لوح تزلج على الجليد"
+  },
+  "sports ball": {
+    "en": "Sports ball",
+    "ru": "Мяч",
+    "bn": "বল",
+    "hi": "खेल की गेंद",
+    "es": "balón",
+    "fr": "balle",
+    "ar": "كرة رياضية"
+  },
+  "kite": {
+    "en": "Kite",
+    "ru": "Воздушный змей",
+    "bn": "ঘুড়ি",
+    "hi": "पतंग",
+    "es": "cometa",
+    "fr": "cerf-volant",
+    "ar": "طائرة ورقية"
+  },
+  "baseball bat": {
+    "en": "Baseball bat",
+    "ru": "Бейсбольная бита",
+    "bn": "বেসবল ব্যাট",
+    "hi": "बेसबॉल बैट",
+    "es": "bate de béisbol",
+    "fr": "batte de baseball",
+    "ar": "مضرب بيسبول"
+  },
+  "baseball glove": {
+    "en": "Baseball glove",
+    "ru": "Бейсбольная перчатка",
+    "bn": "বেসবল গ্লাভস",
+    "hi": "बेसबॉल ग्लव",
+    "es": "guante de béisbol",
+    "fr": "gant de baseball",
+    "ar": "قفاز بيسبول"
+  },
+  "skateboard": {
+    "en": "Skateboard",
+    "ru": "Скейтборд",
+    "bn": "স্কেটবোর্ড",
+    "hi": "स्केटबोर्ड",
+    "es": "monopatín",
+    "fr": "skateboard",
+    "ar": "لوح تزلج"
+  },
+  "surfboard": {
+    "en": "Surfboard",
+    "ru": "Серфборд",
+    "bn": "সার্ফবোর্ড",
+    "hi": "सर्फबोर्ड",
+    "es": "tabla de surf",
+    "fr": "planche de surf",
+    "ar": "لوح ركوب الأمواج"
+  },
+  "tennis racket": {
+    "en": "Tennis racket",
+    "ru": "Теннисная ракетка",
+    "bn": "টেনিস র‍্যাকেট",
+    "hi": "टेनिस रैकेट",
+    "es": "raqueta de tenis",
+    "fr": "raquette de tennis",
+    "ar": "مضرب تنس"
+  },
+  "bottle": {
+    "en": "Bottle",
+    "ru": "Бутылка",
+    "bn": "বোতল",
+    "hi": "बोतल",
+    "es": "botella",
+    "fr": "bouteille",
+    "ar": "زجاجة"
+  },
+  "wine glass": {
+    "en": "Wine glass",
+    "ru": "Бокал",
+    "bn": "ওয়াইন গ্লাস",
+    "hi": "वाइन ग्लास",
+    "es": "copa de vino",
+    "fr": "verre à vin",
+    "ar": "كأس نبيذ"
+  },
+  "cup": {
+    "en": "Cup",
+    "ru": "Чашка",
+    "bn": "কাপ",
+    "hi": "कप",
+    "es": "taza",
+    "fr": "tasse",
+    "ar": "كوب"
+  },
+  "fork": {
+    "en": "Fork",
+    "ru": "Вилка",
+    "bn": "কাঁটা",
+    "hi": "कांटा",
+    "es": "tenedor",
+    "fr": "fourchette",
+    "ar": "شوكة"
+  },
+  "knife": {
+    "en": "Knife",
+    "ru": "Нож",
+    "bn": "ছুরি",
+    "hi": "चाकू",
+    "es": "cuchillo",
+    "fr": "couteau",
+    "ar": "سكين"
+  },
+  "spoon": {
+    "en": "Spoon",
+    "ru": "Ложка",
+    "bn": "চামচ",
+    "hi": "चम्मच",
+    "es": "cuchara",
+    "fr": "cuillère",
+    "ar": "ملعقة"
+  },
+  "bowl": {
+    "en": "Bowl",
+    "ru": "Миска",
+    "bn": "বাটি",
+    "hi": "कटोरा",
+    "es": "bol",
+    "fr": "bol",
+    "ar": "وعاء"
+  },
+  "banana": {
+    "en": "Banana",
+    "ru": "Банан",
+    "bn": "কলা",
+    "hi": "केला",
+    "es": "plátano",
+    "fr": "banane",
+    "ar": "موز"
+  },
+  "apple": {
+    "en": "Apple",
+    "ru": "Яблоко",
+    "bn": "আপেল",
+    "hi": "सेब",
+    "es": "manzana",
+    "fr": "pomme",
+    "ar": "تفاحة"
+  },
+  "sandwich": {
+    "en": "Sandwich",
+    "ru": "Сэндвич",
+    "bn": "স্যান্ডউইচ",
+    "hi": "सैंडविच",
+    "es": "sándwich",
+    "fr": "sandwich",
+    "ar": "شطيرة"
+  },
+  "orange": {
+    "en": "Orange",
+    "ru": "Апельсин",
+    "bn": "কমলা",
+    "hi": "संतरा",
+    "es": "naranja",
+    "fr": "orange",
+    "ar": "برتقال"
+  },
+  "broccoli": {
+    "en": "Broccoli",
+    "ru": "Брокколи",
+    "bn": "ব্রকলি",
+    "hi": "ब्रोकोली",
+    "es": "brócoli",
+    "fr": "brocoli",
+    "ar": "بروكلي"
+  },
+  "carrot": {
+    "en": "Carrot",
+    "ru": "Морковь",
+    "bn": "গাজর",
+    "hi": "गाजर",
+    "es": "zanahoria",
+    "fr": "carotte",
+    "ar": "جزر"
+  },
+  "hot dog": {
+    "en": "Hot dog",
+    "ru": "Хот-дог",
+    "bn": "হট ডগ",
+    "hi": "हॉट डॉग",
+    "es": "perrito caliente",
+    "fr": "hot-dog",
+    "ar": "هوت دوغ"
+  },
+  "pizza": {
+    "en": "Pizza",
+    "ru": "Пицца",
+    "bn": "পিজা",
+    "hi": "पिज़्ज़ा",
+    "es": "pizza",
+    "fr": "pizza",
+    "ar": "بيتزا"
+  },
+  "donut": {
+    "en": "Donut",
+    "ru": "Пончик",
+    "bn": "ডোনাট",
+    "hi": "डोनट",
+    "es": "dona",
+    "fr": "donut",
+    "ar": "دونات"
+  },
+  "cake": {
+    "en": "Cake",
+    "ru": "Торт",
+    "bn": "কেক",
+    "hi": "केक",
+    "es": "pastel",
+    "fr": "gâteau",
+    "ar": "كعكة"
+  },
+  "chair": {
+    "en": "Chair",
+    "ru": "Стул",
+    "bn": "চেয়ার",
+    "hi": "कुर्सी",
+    "es": "silla",
+    "fr": "chaise",
+    "ar": "كرسي"
+  },
+  "couch": {
+    "en": "Couch",
+    "ru": "Диван",
+    "bn": "সোফা",
+    "hi": "सोफ़ा",
+    "es": "sofá",
+    "fr": "canapé",
+    "ar": "أريكة"
+  },
+  "potted plant": {
+    "en": "Potted plant",
+    "ru": "Растение в горшке",
+    "bn": "টবের গাছ",
+    "hi": "गमले का पौधा",
+    "es": "planta en maceta",
+    "fr": "plante en pot",
+    "ar": "نبتة في أصيص"
+  },
+  "bed": {
+    "en": "Bed",
+    "ru": "Кровать",
+    "bn": "বিছানা",
+    "hi": "बिस्तर",
+    "es": "cama",
+    "fr": "lit",
+    "ar": "سرير"
+  },
+  "dining table": {
+    "en": "Dining table",
+    "ru": "Обеденный стол",
+    "bn": "ডাইনিং টেবিল",
+    "hi": "खाने की मेज़",
+    "es": "mesa de comedor",
+    "fr": "table à manger",
+    "ar": "طاولة طعام"
+  },
+  "toilet": {
+    "en": "Toilet",
+    "ru": "Туалет",
+    "bn": "টয়লেট",
+    "hi": "शौचालय",
+    "es": "inodoro",
+    "fr": "toilettes",
+    "ar": "مرحاض"
+  },
+  "tv": {
+    "en": "TV",
+    "ru": "Телевизор",
+    "bn": "টিভি",
+    "hi": "टीवी",
+    "es": "televisor",
+    "fr": "téléviseur",
+    "ar": "تلفاز"
+  },
+  "laptop": {
+    "en": "Laptop",
+    "ru": "Ноутбук",
+    "bn": "ল্যাপটপ",
+    "hi": "लैपटॉप",
+    "es": "portátil",
+    "fr": "ordinateur portable",
+    "ar": "حاسوب محمول"
+  },
+  "mouse": {
+    "en": "Mouse",
+    "ru": "Мышь",
+    "bn": "মাউস",
+    "hi": "माउस",
+    "es": "ratón",
+    "fr": "souris",
+    "ar": "فأرة"
+  },
+  "remote": {
+    "en": "Remote",
+    "ru": "Пульт",
+    "bn": "রিমোট",
+    "hi": "रिमोट",
+    "es": "mando a distancia",
+    "fr": "télécommande",
+    "ar": "جهاز تحكم"
+  },
+  "keyboard": {
+    "en": "Keyboard",
+    "ru": "Клавиатура",
+    "bn": "কীবোর্ড",
+    "hi": "कीबोर्ड",
+    "es": "teclado",
+    "fr": "clavier",
+    "ar": "لوحة مفاتيح"
+  },
+  "cell phone": {
+    "en": "Cell phone",
+    "ru": "Телефон",
+    "bn": "মোবাইল ফোন",
+    "hi": "मोबाइल फोन",
+    "es": "teléfono móvil",
+    "fr": "téléphone portable",
+    "ar": "هاتف محمول"
+  },
+  "microwave": {
+    "en": "Microwave",
+    "ru": "Микроволновка",
+    "bn": "মাইক্রোওভেন",
+    "hi": "माइक्रोवेव",
+    "es": "microondas",
+    "fr": "micro-ondes",
+    "ar": "ميكروويف"
+  },
+  "oven": {
+    "en": "Oven",
+    "ru": "Духовка",
+    "bn": "ওভেন",
+    "hi": "ओवन",
+    "es": "horno",
+    "fr": "four",
+    "ar": "فرن"
+  },
+  "toaster": {
+    "en": "Toaster",
+    "ru": "Тостер",
+    "bn": "টোস্টার",
+    "hi": "टोस्टर",
+    "es": "tostadora",
+    "fr": "grille-pain",
+    "ar": "محمصة"
+  },
+  "sink": {
+    "en": "Sink",
+    "ru": "Раковина",
+    "bn": "সিঙ্ক",
+    "hi": "सिंक",
+    "es": "fregadero",
+    "fr": "évier",
+    "ar": "مغسلة"
+  },
+  "refrigerator": {
+    "en": "Refrigerator",
+    "ru": "Холодильник",
+    "bn": "ফ্রিজ",
+    "hi": "फ्रिज",
+    "es": "refrigerador",
+    "fr": "réfrigérateur",
+    "ar": "ثلاجة"
+  },
+  "book": {
+    "en": "Book",
+    "ru": "Книга",
+    "bn": "বই",
+    "hi": "किताब",
+    "es": "libro",
+    "fr": "livre",
+    "ar": "كتاب"
+  },
+  "clock": {
+    "en": "Clock",
+    "ru": "Часы",
+    "bn": "ঘড়ি",
+    "hi": "घड़ी",
+    "es": "reloj",
+    "fr": "horloge",
+    "ar": "ساعة"
+  },
+  "vase": {
+    "en": "Vase",
+    "ru": "Ваза",
+    "bn": "ফুলদানি",
+    "hi": "फूलदान",
+    "es": "jarrón",
+    "fr": "vase",
+    "ar": "مزهرية"
+  },
+  "scissors": {
+    "en": "Scissors",
+    "ru": "Ножницы",
+    "bn": "কাঁচি",
+    "hi": "कैंची",
+    "es": "tijeras",
+    "fr": "ciseaux",
+    "ar": "مقص"
+  },
+  "teddy bear": {
+    "en": "Teddy bear",
+    "ru": "Плюшевый мишка",
+    "bn": "টেডি বেয়ার",
+    "hi": "टेडी बियर",
+    "es": "oso de peluche",
+    "fr": "ours en peluche",
+    "ar": "دب محشو"
+  },
+  "hair drier": {
+    "en": "Hair drier",
+    "ru": "Фен",
+    "bn": "হেয়ার ড্রায়ার",
+    "hi": "हेयर ड्रायर",
+    "es": "secador de pelo",
+    "fr": "sèche-cheveux",
+    "ar": "مجفف شعر"
+  },
+  "toothbrush": {
+    "en": "Toothbrush",
+    "ru": "Зубная щетка",
+    "bn": "টুথব্রাশ",
+    "hi": "टूथब्रश",
+    "es": "cepillo de dientes",
+    "fr": "brosse à dents",
+    "ar": "فرشاة أسنان"
+  },
+  "door": {
+    "en": "Door",
+    "ru": "Дверь",
+    "bn": "দরজা",
+    "hi": "दरवाज़ा",
+    "es": "puerta",
+    "fr": "porte",
+    "ar": "باب"
+  },
+  "stairs": {
+    "en": "Stairs",
+    "ru": "Лестница",
+    "bn": "সিঁড়ি",
+    "hi": "सीढ़ियाँ",
+    "es": "escaleras",
+    "fr": "escaliers",
+    "ar": "سلالم"
+  }
 }

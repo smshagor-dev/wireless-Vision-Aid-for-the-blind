@@ -1,19 +1,33 @@
+# --------------------------------------------------------------------------------------------- # 
+# | Name: Md. Shahanur Islam Shagor                                                           | # 
+# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
+# | Voronezh State University of Forestry and Technologies                                    | # 
+# | Build for Blind people within 15$                                                         | # 
+# --------------------------------------------------------------------------------------------- # 
+
+
 param(
-  [Parameter(Mandatory = $false)]
-  [string[]]$Languages = @("en-US", "ru-RU"),
+  [Parameter(Mandatory = $true)]
+  [string[]]$Languages,
   [switch]$CopyToSettings
 )
 
+$ErrorActionPreference = "Stop"
+
 function Assert-Admin {
-  $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
-  $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
+  $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
   if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw "Run this script as Administrator."
   }
 }
 
 function Install-LanguageWithSpeech {
-  param([string]$LangCode, [bool]$CopySettings)
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$LangCode,
+    [switch]$CopySettings
+  )
 
   Write-Host "=== Installing language: $LangCode ==="
 

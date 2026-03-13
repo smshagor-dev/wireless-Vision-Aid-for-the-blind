@@ -1,41 +1,52 @@
-/*
- * ESP32-CAM Wireless Camera for WVAB Project
- * 
- * This code sets up ESP32-CAM as a Wi-Fi camera that streams video
- * to the vision processing server.
- * 
- * Hardware Required:
- * - ESP32-CAM module
- * - FTDI programmer (for uploading code)
- * - 5V power supply
- * 
- * Installation:
- * 1. Install ESP32 board in Arduino IDE
- * 2. Select "AI Thinker ESP32-CAM" from Tools > Board
- * 3. Upload this code
- */
+// # --------------------------------------------------------------------------------------------- # 
+// # | Name: Md. Shahanur Islam Shagor                                                           | # 
+// # | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
+// # | Voronezh State University of Forestry and Technologies                                    | # 
+// # | Build for Blind people within 15$                                                         | # 
+// # --------------------------------------------------------------------------------------------- # 
 
+
+#include <Arduino.h>
 #include "esp_camera.h"
 #include <WiFi.h>
-#include "esp_timer.h"
-#include "img_converters.h"
-#include "Arduino.h"
-#include "fb_gfx.h"
-#include "soc/soc.h"
-#include "soc/rtc_cntl_reg.h"
+#include <WiFiUdp.h>
 #include "esp_http_server.h"
-
-// ===== Wi-Fi Configuration =====
-// Option 1: Access Point Mode (ESP32 creates its own network)
-const char* AP_SSID = "WVAB_Camera";
-const char* AP_PASSWORD = "wvab12345";
-
-// Option 2: Station Mode (ESP32 connects to existing Wi-Fi)
-const char* WIFI_SSID = "YOUR_WIFI_NAME";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+#include "esp_system.h"
+#include "mbedtls/gcm.h"
 
 // Set to true for AP mode, false for Station mode
 #define USE_AP_MODE true
+
+// ===== Secure UDP Mode =====
+#define USE_SECURE_UDP true
+
+// ===== Thermal/Power Management =====
+// Target FPS for long-term stability (lower = cooler)
+#define TARGET_FPS 12
+#define MIN_FRAME_INTERVAL_MS (1000 / TARGET_FPS)
+#define WIFI_POWER_SAVE true
+#define WIFI_RECONNECT_INTERVAL_MS 5000
+
+// ===== UDP Target (Vision Server) =====
+const char* UDP_HOST = "192.168.4.2";
+const int UDP_PORT = 9999;
+
+// ===== AES-128 Key (16 bytes) =====
+// Keep in sync with WVAB_UDP_KEY_HEX on server.
+static const uint8_t AES_KEY[16] = {
+  0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+  0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10
+};
+
+// ===== UDP Packet Format =====
+// HEADER: frame_id (uint32), total_chunks (uint16), chunk_index (uint16), payload_size (uint16)
+const uint16_t MAX_UDP_PAYLOAD = 1450;
+const uint16_t HEADER_SIZE = 10;
+const uint16_t NONCE_SIZE = 12;
+const uint16_t TAG_SIZE = 16;
+
+WiFiUDP udp;
+uint32_t frame_id = 0;
 
 // ===== Camera Pin Configuration (AI-Thinker ESP32-CAM) =====
 #define PWDN_GPIO_NUM     32
@@ -124,6 +135,97 @@ static esp_err_t stream_handler(httpd_req_t *req) {
   }
 
   return res;
+}
+
+
+static void write_u32(uint8_t* buf, uint32_t v) {
+  buf[0] = (v >> 24) & 0xFF;
+  buf[1] = (v >> 16) & 0xFF;
+  buf[2] = (v >> 8) & 0xFF;
+  buf[3] = v & 0xFF;
+}
+
+static void write_u16(uint8_t* buf, uint16_t v) {
+  buf[0] = (v >> 8) & 0xFF;
+  buf[1] = v & 0xFF;
+}
+
+static void send_udp_frame(camera_fb_t* fb) {
+  const uint16_t max_plain = MAX_UDP_PAYLOAD - HEADER_SIZE - NONCE_SIZE - TAG_SIZE;
+  uint16_t total_chunks = (fb->len + max_plain - 1) / max_plain;
+
+  mbedtls_gcm_context ctx;
+  mbedtls_gcm_init(&ctx);
+  mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, AES_KEY, 128);
+
+  uint8_t base_nonce[NONCE_SIZE];
+  for (size_t i = 0; i < NONCE_SIZE; i++) {
+    base_nonce[i] = (uint8_t)esp_random();
+  }
+
+  for (uint16_t chunk_index = 0; chunk_index < total_chunks; chunk_index++) {
+    size_t start = chunk_index * max_plain;
+    size_t end = start + max_plain;
+    if (end > fb->len) end = fb->len;
+    uint16_t plain_len = (uint16_t)(end - start);
+
+    uint8_t nonce[NONCE_SIZE];
+    memcpy(nonce, base_nonce, NONCE_SIZE);
+    // last 4 bytes as counter: base + chunk_index (big-endian)
+    uint32_t ctr = (uint32_t(nonce[8]) << 24) |
+                   (uint32_t(nonce[9]) << 16) |
+                   (uint32_t(nonce[10]) << 8) |
+                   (uint32_t(nonce[11]));
+    ctr += chunk_index;
+    nonce[8] = (ctr >> 24) & 0xFF;
+    nonce[9] = (ctr >> 16) & 0xFF;
+    nonce[10] = (ctr >> 8) & 0xFF;
+    nonce[11] = ctr & 0xFF;
+
+    uint8_t* ciphertext = (uint8_t*)malloc(plain_len);
+    if (!ciphertext) {
+      break;
+    }
+
+    uint8_t tag[TAG_SIZE];
+    mbedtls_gcm_crypt_and_tag(
+      &ctx,
+      MBEDTLS_GCM_ENCRYPT,
+      plain_len,
+      nonce,
+      NONCE_SIZE,
+      NULL,
+      0,
+      fb->buf + start,
+      ciphertext,
+      TAG_SIZE,
+      tag
+    );
+
+    uint16_t payload_len = TAG_SIZE + plain_len;
+    if (chunk_index == 0) {
+      payload_len = NONCE_SIZE + TAG_SIZE + plain_len;
+    }
+    uint8_t header[HEADER_SIZE];
+    write_u32(header, frame_id);
+    write_u16(header + 4, total_chunks);
+    write_u16(header + 6, chunk_index);
+    write_u16(header + 8, payload_len);
+
+    udp.beginPacket(UDP_HOST, UDP_PORT);
+    udp.write(header, HEADER_SIZE);
+    if (chunk_index == 0) {
+      udp.write(base_nonce, NONCE_SIZE);
+    }
+    udp.write(tag, TAG_SIZE);
+    udp.write(ciphertext, plain_len);
+    udp.endPacket();
+
+    free(ciphertext);
+  }
+
+  mbedtls_gcm_free(&ctx);
+  frame_id++;
 }
 
 // ===== Start Camera Server =====
@@ -231,6 +333,10 @@ void setup() {
 
   // ===== Wi-Fi Setup =====
   WiFi.mode(WIFI_STA);
+  if (WIFI_POWER_SAVE) {
+    WiFi.setSleep(true);
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+  }
   
   if (USE_AP_MODE) {
     // Create Access Point
@@ -265,8 +371,13 @@ void setup() {
     }
   }
 
-  // Start camera streaming server
-  startCameraServer();
+  // Start streaming mode
+  if (USE_SECURE_UDP) {
+    udp.begin(UDP_PORT);
+    Serial.println("Secure UDP mode enabled");
+  } else {
+    startCameraServer();
+  }
 
   // LED blink to indicate ready
   for (int i = 0; i < 3; i++) {
@@ -283,6 +394,34 @@ void setup() {
 
 // ===== Loop Function =====
 void loop() {
-  // Keep the server running
+  static uint32_t last_wifi_check = 0;
+  uint32_t now = millis();
+  if (now - last_wifi_check >= WIFI_RECONNECT_INTERVAL_MS) {
+    last_wifi_check = now;
+    if (WiFi.status() != WL_CONNECTED) {
+      WiFi.disconnect();
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    }
+  }
+
+  if (USE_SECURE_UDP) {
+    static uint32_t last_frame_ms = 0;
+    if (now - last_frame_ms < MIN_FRAME_INTERVAL_MS) {
+      delay(2);
+      return;
+    }
+    last_frame_ms = now;
+
+    camera_fb_t* fb = esp_camera_fb_get();
+    if (fb) {
+      if (WiFi.status() == WL_CONNECTED) {
+        send_udp_frame(fb);
+      }
+      esp_camera_fb_return(fb);
+    }
+    delay(5);
+    return;
+  }
+  // Keep the HTTP server running
   delay(10);
 }

@@ -1,7 +1,9 @@
-"""
-WVAB Camera GUI
-Real webcam preview with YOLO object detection and real diagnostics.
-"""
+# --------------------------------------------------------------------------------------------- # 
+# | Name: Md. Shahanur Islam Shagor                                                           | # 
+# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
+# | Voronezh State University of Forestry and Technologies                                    | # 
+# | Build for Blind people within 15$                                                         | # 
+# --------------------------------------------------------------------------------------------- # 
 
 import os
 import time
@@ -13,17 +15,199 @@ import threading
 import subprocess
 import unicodedata
 from collections import deque
+import logging
+from logging.handlers import RotatingFileHandler
+import math
 
 import cv2
 import numpy as np
 from PIL import Image, ImageTk
 from PIL import ImageDraw, ImageFont
 import pyttsx3
+try:
+    import psutil
+except Exception:
+    psutil = None
+try:
+    from perception.depth_estimator import DepthEstimator
+    from perception.perception_mapping import update_grid_from_frame
+    from mapping.occupancy_grid import OccupancyGrid
+    from mapping.slam import VisualOdometry
+    from navigation.planner import PathPlanner
+except Exception:
+    DepthEstimator = None
+    update_grid_from_frame = None
+    OccupancyGrid = None
+    VisualOdometry = None
+    PathPlanner = None
+from offline_utils import configure_offline_env, ensure_local_model
 
+OFFLINE_MODE = configure_offline_env()
 try:
     from ultralytics import YOLO
 except Exception:
     YOLO = None
+try:
+    import torch
+except Exception:
+    torch = None
+
+from core.config import load_config
+
+COLORS = {
+    "background": "#0B0F16",
+    "panel": "#111827",
+    "border": "#1F2937",
+    "accent": "#22D3EE",
+    "success": "#22C55E",
+    "warning": "#FACC15",
+    "danger": "#EF4444",
+    "danger_dark": "#991B1B",
+    "text": "#E5E7EB",
+    "muted": "#94A3B8",
+}
+
+
+class Panel(tk.Frame):
+    def __init__(self, parent, title):
+        super().__init__(parent, bg=COLORS["panel"], highlightbackground=COLORS["border"], highlightthickness=1)
+        tk.Label(
+            self,
+            text=title,
+            fg=COLORS["muted"],
+            bg=COLORS["panel"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(anchor="w", padx=12, pady=(8, 6))
+
+
+class TopBar(tk.Frame):
+    def __init__(self, parent, status_var, model_var, gpu_var, uptime_var):
+        super().__init__(parent, bg=COLORS["panel"], highlightbackground=COLORS["border"], highlightthickness=1)
+        tk.Label(
+            self,
+            text="WVAB Autonomous Navigation Dashboard",
+            fg=COLORS["text"],
+            bg=COLORS["panel"],
+            font=("Segoe UI", 14, "bold"),
+        ).pack(side=tk.LEFT, padx=12, pady=10)
+
+        right = tk.Frame(self, bg=COLORS["panel"])
+        right.pack(side=tk.RIGHT, padx=12)
+        self._pill(right, status_var, COLORS["success"])
+        self._pill(right, model_var, COLORS["accent"])
+        self._pill(right, gpu_var, COLORS["accent"])
+        self._pill(right, uptime_var, COLORS["accent"])
+
+    def _pill(self, parent, var, color):
+        lbl = tk.Label(parent, textvariable=var, fg=color, bg=COLORS["panel"], font=("Segoe UI", 9, "bold"))
+        lbl.pack(side=tk.LEFT, padx=6)
+        return lbl
+
+
+class ModelStatusPanel(Panel):
+    def __init__(self, parent):
+        super().__init__(parent, "Model & Stream Status")
+        self.yolo_var = tk.StringVar(value="YOLO Model: -")
+        self.depth_var = tk.StringVar(value="Depth Model: -")
+        self.stream_var = tk.StringVar(value="Streaming: -")
+        for var in (self.yolo_var, self.depth_var, self.stream_var):
+            tk.Label(self, textvariable=var, fg=COLORS["text"], bg=COLORS["panel"], font=("Segoe UI", 10)).pack(
+                anchor="w", padx=12, pady=4
+            )
+
+
+class ObjectListPanel(Panel):
+    def __init__(self, parent):
+        super().__init__(parent, "Detected Objects")
+        self.listbox = tk.Listbox(self, bg=COLORS["panel"], fg=COLORS["text"], highlightthickness=0, relief="flat")
+        self.listbox.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+
+class DepthPanel(Panel):
+    def __init__(self, parent):
+        super().__init__(parent, "Depth Map")
+        self.preview = tk.Label(self, text="Depth Visualization", fg=COLORS["muted"], bg=COLORS["panel"])
+        self.preview.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+
+class CameraPanel(Panel):
+    def __init__(self, parent):
+        super().__init__(parent, "Live Camera Feed")
+        self.preview = tk.Label(self, bg="black")
+        self.preview.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+
+class NavigationPanel(Panel):
+    def __init__(self, parent, start_cb, pause_cb, stop_cb, emergency_cb):
+        super().__init__(parent, "Navigation Controls")
+        grid = tk.Frame(self, bg=COLORS["panel"])
+        grid.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+        for i in range(2):
+            grid.grid_columnconfigure(i, weight=1)
+        tk.Button(grid, text="START", bg=COLORS["success"], fg="white", command=start_cb).grid(
+            row=0, column=0, padx=6, pady=6, sticky="ew"
+        )
+        tk.Button(grid, text="PAUSE", bg=COLORS["warning"], fg="#111827", command=pause_cb).grid(
+            row=0, column=1, padx=6, pady=6, sticky="ew"
+        )
+        tk.Button(grid, text="STOP", bg=COLORS["danger"], fg="white", command=stop_cb).grid(
+            row=1, column=0, padx=6, pady=6, sticky="ew"
+        )
+        tk.Button(grid, text="EMERGENCY STOP", bg=COLORS["danger_dark"], fg="white", command=emergency_cb).grid(
+            row=1, column=1, padx=6, pady=6, sticky="ew"
+        )
+
+
+class MetricsPanel(Panel):
+    def __init__(self, parent):
+        super().__init__(parent, "Metrics")
+        self.metrics_var = tk.StringVar(value="Camera FPS: - | SLAM FPS: - | CPU: - | GPU: - | RAM: -")
+        tk.Label(self, textvariable=self.metrics_var, fg=COLORS["text"], bg=COLORS["panel"], font=("Segoe UI", 10)).pack(
+            anchor="w", padx=12, pady=6
+        )
+
+
+class GoalPanel(Panel):
+    def __init__(self, parent):
+        super().__init__(parent, "Goal Status")
+        self.goal_var = tk.StringVar(value="Goal: (5.0, 0.0)")
+        self.dist_var = tk.StringVar(value="Distance: 4.2m")
+        self.state_var = tk.StringVar(value="State: NAVIGATING")
+        for var in (self.goal_var, self.dist_var, self.state_var):
+            tk.Label(self, textvariable=var, fg=COLORS["text"], bg=COLORS["panel"], font=("Segoe UI", 10)).pack(
+                anchor="w", padx=12, pady=4
+            )
+
+
+class MapPanel(Panel):
+    def __init__(self, parent):
+        super().__init__(parent, "Localization & Map")
+        self.map_preview = tk.Label(self, text="Occupancy Grid + Path Overlay", fg=COLORS["muted"], bg=COLORS["panel"])
+        self.map_preview.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+
+class StatusBar(Panel):
+    def __init__(self, parent):
+        super().__init__(parent, "System Status")
+        self.leds = {}
+        for label in ("AI ACTIVE", "SLAM ACTIVE", "DOCKER READY", "STREAMING ACTIVE"):
+            row = tk.Frame(self, bg=COLORS["panel"])
+            row.pack(anchor="w", padx=12, pady=2, fill=tk.X)
+            led = tk.Canvas(row, width=10, height=10, bg=COLORS["panel"], highlightthickness=0)
+            led.create_oval(1, 1, 9, 9, fill=COLORS["success"], outline="")
+            led.pack(side=tk.LEFT)
+            tk.Label(row, text=label, fg=COLORS["success"], bg=COLORS["panel"], font=("Segoe UI", 9, "bold")).pack(
+                side=tk.LEFT, padx=6
+            )
+            self.leds[label] = led
+        self.risk_var = tk.StringVar(value="Status: NORMAL")
+        tk.Label(self, textvariable=self.risk_var, fg=COLORS["warning"], bg=COLORS["panel"], font=("Segoe UI", 10, "bold")).pack(
+            anchor="w", padx=12, pady=(6, 2)
+        )
+        self.audio_var = tk.StringVar(value='Audio: "..."')
+        tk.Label(self, textvariable=self.audio_var, fg=COLORS["accent"], bg=COLORS["panel"], font=("Segoe UI", 10)).pack(
+            anchor="w", padx=12, pady=(8, 4)
+        )
 
 
 class CameraGUI:
@@ -38,11 +222,13 @@ class CameraGUI:
         self.root = root
         self.root.title("WVAB Camera GUI - Real Test + ML")
         self.root.geometry("1120x760")
+        self.config = self._load_config()
 
         self.model_path = model_path
         self.language = (language or "en").strip().lower()
         self.speech_language = self.language
         self.labels_path = labels_path
+        self.logger = self._setup_logger()
         self.model = None
         self.ml_enabled = False
         self.audio_enabled = True
@@ -58,7 +244,9 @@ class CameraGUI:
         self.last_spoken_gui_text = ""
         self.gui_speech_cooldown = 0.25
         self.last_gui_speech_time = 0.0
-        self.default_focal_length_px = 700.0
+        self.default_focal_length_px = float(self._cfg("camera.focal_length_px", 700.0))
+        self.depth_scale_m = float(self._cfg("perception.depth.scale_m", 5.0))
+        self.goal_distance_m = float(self._cfg("navigation.goal_distance_m", 5.0))
         self.known_object_width_m = {
             "person": 0.45,
             "car": 1.8,
@@ -91,6 +279,13 @@ class CameraGUI:
 
         self.last_loop_time = time.time()
         self.last_fps = 0.0
+        self.start_time = time.time()
+        self.paused = False
+        self.sys_status_var = tk.StringVar(value="OFFLINE")
+        self.uptime_var = tk.StringVar(value="00:00:00")
+        self.model_status_var = tk.StringVar(value="Model: Not loaded")
+        self.gpu_var = tk.StringVar(value="GPU: N/A")
+        self.audio_msg_var = tk.StringVar(value='Audio: "..."')
 
         self.test_active = False
         self.test_start = 0.0
@@ -121,70 +316,213 @@ class CameraGUI:
         self.tts_thread.start()
         self.last_spoken_text = ""
         self.overlay_font = self._load_overlay_font()
+        self.depth_estimator = DepthEstimator(model_name="midas_small", device="auto", logger=self.logger) if DepthEstimator else None
+        self.depth_every_n = 3
+        self.depth_frame_count = 0
+        self.last_depth_map = None
+        self.occupancy_grid = None
+        self.visual_odometry = None
+        self.path_planner = None
+        self.last_pose = (0.0, 0.0, 0.0)
+        self.last_path = []
+        self.last_slam_fps = 0.0
+        if OccupancyGrid and VisualOdometry and PathPlanner:
+            self.occupancy_grid = OccupancyGrid(width_m=20.0, height_m=20.0, resolution=0.1, origin=(-10.0, -10.0))
+            self.visual_odometry = VisualOdometry(600.0, 600.0, 320.0, 180.0)
+            self.path_planner = PathPlanner(allow_diagonal=True, smooth=True)
 
         self._build_ui()
         self.source_var.set(str(camera_source))
         self._load_model()
+        self._startup_wizard()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.auto_restart = True
 
     def _build_ui(self):
-        top = tk.Frame(self.root)
-        top.pack(fill=tk.X, padx=10, pady=8)
+        self.root.configure(bg=COLORS["background"])
+        self.root.grid_rowconfigure(1, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.bind("<Configure>", self._on_resize)
 
-        tk.Label(top, text="Camera Source (0 / URL):").pack(side=tk.LEFT)
-        self.source_var = tk.StringVar(value="0")
-        tk.Entry(top, textvariable=self.source_var, width=35).pack(side=tk.LEFT, padx=6)
+        self.preview_target_w = 960
+        self.preview_target_h = 540
 
-        tk.Button(top, text="Start Camera", command=self.start_camera).pack(side=tk.LEFT, padx=4)
-        tk.Button(top, text="Stop Camera", command=self.stop_camera).pack(side=tk.LEFT, padx=4)
-        tk.Button(top, text="Real Test (5s)", command=self.start_real_test).pack(side=tk.LEFT, padx=4)
-        tk.Button(top, text="Snapshot", command=self.save_snapshot).pack(side=tk.LEFT, padx=4)
-        tk.Button(top, text="Record", command=self.toggle_recording).pack(side=tk.LEFT, padx=4)
-        self.ml_btn = tk.Button(top, text="ML: OFF", command=self.toggle_ml)
-        self.ml_btn.pack(side=tk.LEFT, padx=4)
-        self.audio_btn = tk.Button(top, text="Audio: ON", command=self.toggle_audio)
-        self.audio_btn.pack(side=tk.LEFT, padx=4)
-        tk.Label(top, text="Lang:").pack(side=tk.LEFT, padx=(10, 3))
-        self.lang_var = tk.StringVar(value=self.language)
-        self.lang_menu = tk.OptionMenu(top, self.lang_var, *self.available_languages, command=self.set_language)
-        self.lang_menu.pack(side=tk.LEFT, padx=2)
-        tk.Button(top, text="Exit", command=self.on_close).pack(side=tk.RIGHT, padx=4)
-
-        body = tk.Frame(self.root)
-        body.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
-
-        self.preview = tk.Label(body, bg="black", width=960, height=540)
-        self.preview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        side_panel = tk.Frame(body, width=220)
-        side_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=8)
-        tk.Label(side_panel, text="Detected Objects", font=("Segoe UI", 10, "bold")).pack(
-            anchor="w", pady=(0, 6)
+        TopBar(self.root, self.sys_status_var, self.model_status_var, self.gpu_var, self.uptime_var).grid(
+            row=0, column=0, sticky="ew", padx=16, pady=(16, 8)
         )
-        self.detect_box = tk.Text(side_panel, width=28, height=30, state=tk.DISABLED)
-        self.detect_box.pack(fill=tk.Y, expand=True)
 
-        bottom = tk.Frame(self.root)
-        bottom.pack(fill=tk.X, padx=10, pady=8)
+        main = tk.Frame(self.root, bg=COLORS["background"])
+        main.grid(row=1, column=0, sticky="nsew", padx=16)
+        main.grid_columnconfigure(0, weight=1)
+        main.grid_columnconfigure(1, weight=3)
+        main.grid_columnconfigure(2, weight=1)
+        main.grid_rowconfigure(0, weight=1)
+        main.grid_rowconfigure(1, weight=0)
+
+        left = tk.Frame(main, bg=COLORS["background"])
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        left.grid_columnconfigure(0, weight=1)
+        left.grid_rowconfigure(1, weight=1)
+
+        self.model_panel = ModelStatusPanel(left)
+        self.model_panel.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        self.object_panel = ObjectListPanel(left)
+        self.object_panel.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
+        self.depth_panel = DepthPanel(left)
+        self.depth_panel.grid(row=2, column=0, sticky="ew")
+        self.detect_box = self.object_panel.listbox
+
+        center = tk.Frame(main, bg=COLORS["background"])
+        center.grid(row=0, column=1, sticky="nsew", padx=(0, 8))
+        center.grid_rowconfigure(0, weight=1)
+        center.grid_columnconfigure(0, weight=1)
+
+        self.camera_panel = CameraPanel(center)
+        self.camera_panel.grid(row=0, column=0, sticky="nsew")
+        self.preview = self.camera_panel.preview
+
+        right = tk.Frame(main, bg=COLORS["background"])
+        right.grid(row=0, column=2, sticky="nsew")
+        right.grid_rowconfigure(2, weight=1)
+        right.grid_columnconfigure(0, weight=1)
+
+        NavigationPanel(
+            right,
+            start_cb=self.start_camera,
+            pause_cb=self.toggle_pause,
+            stop_cb=self.stop_camera,
+            emergency_cb=self.emergency_stop,
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        self.metrics_panel = MetricsPanel(right)
+        self.metrics_panel.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        self.metrics_var = self.metrics_panel.metrics_var
+        self.goal_panel = GoalPanel(right)
+        self.goal_panel.grid(row=2, column=0, sticky="nsew")
+
+        bottom = tk.Frame(self.root, bg=COLORS["background"])
+        bottom.grid(row=2, column=0, sticky="ew", padx=16, pady=(10, 16))
+        bottom.grid_columnconfigure(0, weight=2)
+        bottom.grid_columnconfigure(1, weight=1)
+
+        self.map_panel = MapPanel(bottom)
+        self.map_panel.grid(row=0, column=0, sticky="ew")
+        self.map_preview = self.map_panel.map_preview
+        self.status_bar = StatusBar(bottom)
+        self.status_bar.grid(row=0, column=1, sticky="ew", padx=(12, 0))
         self.status_var = tk.StringVar(value="Idle")
-        self.metrics_var = tk.StringVar(value="FPS: - | Brightness: - | Blur: -")
         self.object_var = tk.StringVar(value="Objects: No real objects yet")
-        tk.Label(bottom, textvariable=self.status_var, anchor="w").pack(fill=tk.X)
-        tk.Label(bottom, textvariable=self.metrics_var, anchor="w").pack(fill=tk.X)
-        tk.Label(bottom, textvariable=self.object_var, anchor="w").pack(fill=tk.X)
+        self.status_bar.audio_var = self.audio_msg_var
+
+        controls = tk.Frame(self.root, bg=COLORS["background"])
+        controls.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 10))
+        tk.Label(controls, text="Camera Source (0 / URL):", fg=COLORS["muted"], bg=COLORS["background"]).pack(side=tk.LEFT)
+        self.source_var = tk.StringVar(value="0")
+        tk.Entry(controls, textvariable=self.source_var, width=35).pack(side=tk.LEFT, padx=6)
+        tk.Button(controls, text="Real Test (5s)", command=self.start_real_test).pack(side=tk.LEFT, padx=4)
+        tk.Button(controls, text="Snapshot", command=self.save_snapshot).pack(side=tk.LEFT, padx=4)
+        tk.Button(controls, text="Record", command=self.toggle_recording).pack(side=tk.LEFT, padx=4)
+        self.ml_btn = tk.Button(controls, text="ML: OFF", command=self.toggle_ml)
+        self.ml_btn.pack(side=tk.LEFT, padx=4)
+        self.audio_btn = tk.Button(controls, text="Audio: ON", command=self.toggle_audio)
+        self.audio_btn.pack(side=tk.LEFT, padx=4)
+        tk.Label(controls, text="Lang:", fg=COLORS["muted"], bg=COLORS["background"]).pack(side=tk.LEFT, padx=(10, 3))
+        self.lang_var = tk.StringVar(value=self.language)
+        self.lang_menu = tk.OptionMenu(controls, self.lang_var, *self.available_languages, command=self.set_language)
+        self.lang_menu.pack(side=tk.LEFT, padx=2)
+        tk.Button(controls, text="Exit", command=self.on_close).pack(side=tk.RIGHT, padx=4)
+
+    def _load_config(self):
+        try:
+            return load_config("config/config.yaml")
+        except Exception:
+            return {}
+
+    def _cfg(self, path, default=None):
+        data = self.config
+        for key in path.split("."):
+            if not isinstance(data, dict):
+                return default
+            data = data.get(key)
+        return default if data is None else data
+
+    def _startup_wizard(self):
+        wizard = tk.Toplevel(self.root)
+        wizard.title("Startup Setup")
+        wizard.configure(bg=COLORS["background"])
+        wizard.resizable(False, False)
+        wizard.grab_set()
+
+        tk.Label(wizard, text="WVAB Startup Setup", fg=COLORS["text"], bg=COLORS["background"],
+                 font=("Segoe UI", 14, "bold")).pack(padx=16, pady=(16, 8))
+
+        # Audio test
+        audio_frame = tk.Frame(wizard, bg=COLORS["background"])
+        audio_frame.pack(fill=tk.X, padx=16, pady=6)
+        tk.Label(audio_frame, text="Audio Test:", fg=COLORS["muted"], bg=COLORS["background"]).pack(side=tk.LEFT)
+        tk.Button(audio_frame, text="Play Test", command=lambda: self.speak("Audio test")).pack(side=tk.LEFT, padx=8)
+
+        # Camera select
+        cam_frame = tk.Frame(wizard, bg=COLORS["background"])
+        cam_frame.pack(fill=tk.X, padx=16, pady=6)
+        tk.Label(cam_frame, text="Camera Source:", fg=COLORS["muted"], bg=COLORS["background"]).pack(side=tk.LEFT)
+        cam_var = tk.StringVar(value=self.source_var.get())
+        tk.Entry(cam_frame, textvariable=cam_var, width=30).pack(side=tk.LEFT, padx=8)
+
+        # Language select
+        lang_frame = tk.Frame(wizard, bg=COLORS["background"])
+        lang_frame.pack(fill=tk.X, padx=16, pady=6)
+        tk.Label(lang_frame, text="Language:", fg=COLORS["muted"], bg=COLORS["background"]).pack(side=tk.LEFT)
+        lang_var = tk.StringVar(value=self.language)
+        tk.OptionMenu(lang_frame, lang_var, *self.available_languages).pack(side=tk.LEFT, padx=8)
+
+        # Buttons
+        btn_frame = tk.Frame(wizard, bg=COLORS["background"])
+        btn_frame.pack(padx=16, pady=16, fill=tk.X)
+        def on_ok():
+            self.source_var.set(cam_var.get().strip() or "0")
+            self.lang_var.set(lang_var.get().strip() or "en")
+            self.set_language(self.lang_var.get())
+            wizard.destroy()
+            self.root.attributes("-fullscreen", True)
+            self.start_camera()
+
+        def on_cancel():
+            wizard.destroy()
+
+        tk.Button(btn_frame, text="OK", bg=COLORS["success"], fg="white", command=on_ok).pack(side=tk.LEFT, padx=8)
+        tk.Button(btn_frame, text="Cancel", bg=COLORS["danger"], fg="white", command=on_cancel).pack(side=tk.LEFT)
+
+    def _on_resize(self, _event):
+        if self.preview is None:
+            return
+        w = max(self.preview.winfo_width(), 1)
+        h = max(self.preview.winfo_height(), 1)
+        if w > 1 and h > 1:
+            self.preview_target_w = w
+            self.preview_target_h = h
 
     def _load_model(self):
         if YOLO is None:
             self.status_var.set("Ultralytics not installed. ML disabled.")
             self.ml_enabled = False
             self.ml_btn.configure(text="ML: OFF")
+            self.model_status_var.set("Model: Unavailable")
+            if hasattr(self, "model_panel"):
+                self.model_panel.yolo_var.set("YOLO Model: Unavailable")
             return
         try:
-            self.model = YOLO(self.model_path)
+            self.model = YOLO(ensure_local_model(self.model_path, offline=OFFLINE_MODE))
             self.ml_enabled = True
             self.ml_btn.configure(text="ML: ON")
+            if torch and torch.cuda.is_available():
+                self.yolo_device = "cuda"
+            else:
+                self.yolo_device = "cpu"
             self.object_labels = self._build_object_labels()
             self.status_var.set(f"ML model loaded: {self.model_path}")
+            self.model_status_var.set(f"Model: {os.path.basename(self.model_path)}")
+            if hasattr(self, "model_panel"):
+                self.model_panel.yolo_var.set(f"YOLO Model: {os.path.basename(self.model_path)}")
             self.session_summary["model_loaded"] = True
             self.session_summary["defined_objects"] = len(self.object_labels)
         except Exception as exc:
@@ -192,6 +530,9 @@ class CameraGUI:
             self.ml_enabled = False
             self.ml_btn.configure(text="ML: OFF")
             self.status_var.set(f"Model load failed: {exc}")
+            self.model_status_var.set("Model: Load failed")
+            if hasattr(self, "model_panel"):
+                self.model_panel.yolo_var.set("YOLO Model: Load failed")
 
     def _load_multilingual_labels(self, path):
         if not path or not os.path.exists(path):
@@ -200,6 +541,7 @@ class CameraGUI:
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
+            self.logger.exception("Failed to load labels file '%s'", path)
             return {}
 
     def _detect_tts_languages(self):
@@ -273,8 +615,9 @@ class CameraGUI:
                 if isinstance(maybe, str) and maybe.strip():
                     return maybe
         dmap = {
-            "en": {"left": "in left", "right": "in right", "in front": "in front"},
+            "en": {"left": "left", "right": "right", "in front": "ahead"},
             "ru": {"left": "слева", "right": "справа", "in front": "спереди"},
+            "bn": {"left": "বামে", "right": "ডানে", "in front": "সামনে"},
         }
         table = dmap.get(self.language, dmap["en"])
         return table.get(direction, direction)
@@ -288,20 +631,21 @@ class CameraGUI:
                 if isinstance(maybe, str) and maybe.strip():
                     return maybe
         dmap = {
-            "en": {"too far": "too far", "close": "close", "very close": "very close"},
+            "en": {"too far": "far", "close": "close", "very close": "very close"},
             "ru": {"too far": "далеко", "close": "близко", "very close": "очень близко"},
+            "bn": {"too far": "দূরে", "close": "কাছে", "very close": "খুব কাছে"},
         }
         table = dmap.get(self.language, dmap["en"])
         return table.get(distance, distance)
 
     def _build_localized_object_phrase(self, object_name, direction, distance):
         if isinstance(distance, tuple):
-            distance_label, distance_m = distance
+            distance_label, _distance_m = distance
         else:
-            distance_label, distance_m = distance, None
-        text = f"{object_name} {self._localized_direction(direction)} {self._localized_distance(distance_label)}"
-        if distance_m is not None:
-            text = f"{text}, about {distance_m:.1f} meters"
+            distance_label, _distance_m = distance, None
+        text = f"{object_name} {self._localized_direction(direction)}"
+        if distance_label in ("close", "very close"):
+            text = f"{text} {self._localized_distance(distance_label)}"
         return text
 
     def _overlay_safe_text(self, text):
@@ -314,18 +658,47 @@ class CameraGUI:
             return ascii_text if ascii_text.strip() else "object"
 
     def _load_overlay_font(self):
-        font_candidates = [
-            "C:/Windows/Fonts/arial.ttf",
-            "C:/Windows/Fonts/seguiemj.ttf",
-            "C:/Windows/Fonts/segoeui.ttf",
-        ]
+        env_path = os.environ.get("WVAB_FONT_PATH", "").strip()
+        font_candidates = []
+        if env_path:
+            font_candidates.append(env_path)
+
+        lang = (self.language or "en").lower()
+        if lang.startswith("bn"):
+            font_candidates += [
+                "C:/Windows/Fonts/Nirmala.ttf",
+                "C:/Windows/Fonts/kalpurush.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansBengaliUI-Regular.ttf",
+            ]
+        elif lang.startswith("hi"):
+            font_candidates += [
+                "C:/Windows/Fonts/Mangal.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+            ]
+        elif lang.startswith("ru"):
+            font_candidates += [
+                "C:/Windows/Fonts/arial.ttf",
+                "C:/Windows/Fonts/segoeui.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            ]
+        else:
+            font_candidates += [
+                "C:/Windows/Fonts/arial.ttf",
+                "C:/Windows/Fonts/seguiemj.ttf",
+                "C:/Windows/Fonts/segoeui.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            ]
         for path in font_candidates:
             if os.path.exists(path):
                 try:
-                    return ImageFont.truetype(path, 18)
+                    font = ImageFont.truetype(path, 18)
+                    self.logger.info("Overlay font loaded: %s", path)
+                    return font
                 except Exception:
                     continue
         try:
+            self.logger.warning("Overlay font not found; using default font.")
             return ImageFont.load_default()
         except Exception:
             return None
@@ -430,7 +803,7 @@ class CameraGUI:
                 self._speak_blocking(text)
                 self.last_spoken_text = text
             except Exception as exc:
-                print(f"[AUDIO][GUI] speech failed: {exc}")
+                self.logger.exception("[AUDIO][GUI] speech failed")
                 time.sleep(0.05)
 
     def speak(self, text):
@@ -501,11 +874,18 @@ class CameraGUI:
         self.camera_running = True
         self.session_summary["camera_started"] = True
         self.status_var.set(f"Camera started: {source}")
+        self.sys_status_var.set("ONLINE")
         self.last_loop_time = time.time()
-        self.update_frame()
+        try:
+            self.update_frame()
+        except Exception as exc:
+            self.logger.exception("Camera loop error: %s", exc)
+            if self.auto_restart:
+                self.root.after(500, self.start_camera)
 
     def stop_camera(self):
         self.camera_running = False
+        self.sys_status_var.set("OFFLINE")
         self.stop_recording_if_needed()
         if self.cap is not None:
             self.cap.release()
@@ -554,7 +934,13 @@ class CameraGUI:
         frame_keys = set()
         speech_candidates = []
         frame_h, frame_w = frame.shape[:2]
-        results = self.model(frame, imgsz=416, verbose=False)
+        # Downscale for faster inference
+        infer_frame = cv2.resize(frame, (640, 360))
+        device = self.yolo_device or "cpu"
+        try:
+            results = self.model(infer_frame, imgsz=320, verbose=False, device=device)
+        except Exception:
+            results = self.model(infer_frame, imgsz=320, verbose=False)
         for result in results:
             for box in result.boxes:
                 conf = float(box.conf[0])
@@ -650,18 +1036,71 @@ class CameraGUI:
         right = lane_risk["right"]
 
         if center >= 3.0 and left >= 2.5 and right >= 2.5:
-            return "Stop. Obstacles very close"
+            return "Stop"
         if center >= 2.0:
             if left + 0.3 < right:
-                return "Move left"
+                return "Left"
             if right + 0.3 < left:
-                return "Move right"
-            return "Slow down"
+                return "Right"
+            return "Slow"
         if left + 0.2 < right:
-            return "Move left"
+            return "Left"
         if right + 0.2 < left:
-            return "Move right"
-        return "Move straight"
+            return "Right"
+        return "Straight"
+
+    def _translate_movement_instruction(self, instruction):
+        mapping = {
+            "Stop": {
+                "en": "Stop",
+                "ru": "СТОП",
+                "bn": "থামুন",
+                "hi": "रुकें",
+                "es": "Alto",
+                "fr": "Stop",
+                "ar": "توقف",
+            },
+            "Left": {
+                "en": "Left",
+                "ru": "НАЛЕВО",
+                "bn": "বামে",
+                "hi": "बाएं",
+                "es": "Izquierda",
+                "fr": "À gauche",
+                "ar": "يسار",
+            },
+            "Right": {
+                "en": "Right",
+                "ru": "НАПРАВО",
+                "bn": "ডানে",
+                "hi": "दाएं",
+                "es": "Derecha",
+                "fr": "À droite",
+                "ar": "يمين",
+            },
+            "Slow": {
+                "en": "Slow",
+                "ru": "МЕДЛЕННЕЕ",
+                "bn": "ধীরে",
+                "hi": "धीरे",
+                "es": "Despacio",
+                "fr": "Lent",
+                "ar": "ببطء",
+            },
+            "Straight": {
+                "en": "Straight",
+                "ru": "ПРЯМО",
+                "bn": "সোজা",
+                "hi": "सीधा",
+                "es": "Recto",
+                "fr": "Tout droit",
+                "ar": "مستقيم",
+            },
+        }
+        entry = mapping.get(instruction)
+        if entry:
+            return entry.get(self.language, entry.get("en", instruction))
+        return instruction
 
     def maybe_announce_movement(self, detections, frame_shape):
         if not self.audio_enabled:
@@ -674,7 +1113,7 @@ class CameraGUI:
         ):
             self.last_movement_announcement = instruction
             self.last_movement_time = now
-            self.speak(instruction)
+            self.speak(self._translate_movement_instruction(instruction))
 
     def _refresh_detect_box(self):
         lines = []
@@ -688,63 +1127,211 @@ class CameraGUI:
                 pretty_name = self.translate_class_name(key, default_name)
                 lines.append(f"{pretty_name} ({key}): {value}")
 
-        self.detect_box.configure(state=tk.NORMAL)
-        self.detect_box.delete("1.0", tk.END)
-        self.detect_box.insert(tk.END, "\n".join(lines))
-        self.detect_box.configure(state=tk.DISABLED)
+        if isinstance(self.detect_box, tk.Listbox):
+            self.detect_box.delete(0, tk.END)
+            for line in lines:
+                self.detect_box.insert(tk.END, line)
+        else:
+            self.detect_box.configure(state=tk.NORMAL)
+            self.detect_box.delete("1.0", tk.END)
+            self.detect_box.insert(tk.END, "\n".join(lines))
+            self.detect_box.configure(state=tk.DISABLED)
 
     def update_frame(self):
         if not self.camera_running or self.cap is None:
             return
+        if self.paused:
+            self.root.after(100, self.update_frame)
+            return
+        try:
+            ok, frame = self.cap.read()
+            if not ok or frame is None:
+                self.status_var.set("Frame read failed")
+                self.root.after(50, self.update_frame)
+                return
 
-        ok, frame = self.cap.read()
-        if not ok or frame is None:
-            self.status_var.set("Frame read failed")
-            self.root.after(50, self.update_frame)
+            self.total_frames += 1
+            self.current_frame = frame.copy()
+
+            if self.recording and self.video_writer is not None:
+                self.video_writer.write(frame)
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            brightness = float(gray.mean())
+            blur_score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+            frame, detections = self._detect_real_objects(frame)
+            self._update_depth_preview(frame)
+            self._update_map(frame, detections)
+            frame = self._update_overlay_info(frame)
+            if detections:
+                first = detections[0]
+                self.last_detect_text = self._build_localized_object_phrase(first[1], first[2], (first[3], first[6]))
+                self.maybe_speak_display_text(self.last_detect_text)
+            else:
+                self.last_detect_text = "No real objects yet"
+            if detections and any(d[2] in ("very close", "close") for d in detections):
+                if hasattr(self, "status_bar"):
+                    self.status_bar.risk_var.set("⚠ OBSTACLE AHEAD")
+            else:
+                if hasattr(self, "status_bar"):
+                    self.status_bar.risk_var.set("Status: NORMAL")
+            self._refresh_detect_box()
+
+            if self.test_active:
+                self.test_frames += 1
+                self.test_brightness_sum += brightness
+                self.test_blur_sum += blur_score
+                self._finish_test_if_needed()
+
+            now = time.time()
+            dt = max(now - self.last_loop_time, 1e-6)
+            self.last_fps = 1.0 / dt
+            self.last_loop_time = now
+
+            display = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            target_w = max(int(self.preview_target_w), 1)
+            target_h = max(int(self.preview_target_h), 1)
+            display = cv2.resize(display, (target_w, target_h))
+            image = Image.fromarray(display)
+            image_tk = ImageTk.PhotoImage(image=image)
+            self.preview.image_tk = image_tk
+            self.preview.configure(image=image_tk)
+
+            cpu = psutil.cpu_percent(interval=None) if psutil else None
+            ram = psutil.virtual_memory().percent if psutil else None
+            cam_fps = self.last_fps
+            slam_fps = f"{self.last_slam_fps:.1f}" if self.last_slam_fps > 0 else "-"
+            gpu = self._read_gpu_usage()
+            self.metrics_var.set(
+                f"Camera FPS: {cam_fps:.1f} | SLAM FPS: {slam_fps} | CPU: {cpu if cpu is not None else 'N/A'}% | GPU: {gpu} | RAM: {ram if ram is not None else 'N/A'}%"
+            )
+            self.object_var.set(f"Objects: {self.last_detect_text}")
+            self.audio_msg_var.set(f'Audio: "{self.last_detect_text}"')
+            self.sys_status_var.set("ONLINE")
+            self.uptime_var.set(self._format_uptime(time.time() - self.start_time))
+            self.root.after(15, self.update_frame)
+        except Exception as exc:
+            self.logger.exception("Update loop error: %s", exc)
+            if self.auto_restart:
+                self.root.after(500, self.update_frame)
+
+    def _update_depth_preview(self, frame):
+        if self.depth_estimator is None:
+            return
+        self.depth_frame_count += 1
+        if self.depth_frame_count % self.depth_every_n != 0:
+            return
+        try:
+            depth_map = self.depth_estimator.predict(frame)
+            self.last_depth_map = depth_map
+            depth_norm = (depth_map * 255.0).clip(0, 255).astype(np.uint8)
+            depth_color = cv2.applyColorMap(depth_norm, cv2.COLORMAP_TURBO)
+            preview = cv2.resize(depth_color, (240, 140))
+            preview = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
+            image = Image.fromarray(preview)
+            image_tk = ImageTk.PhotoImage(image=image)
+            self.depth_panel.preview.image_tk = image_tk
+            self.depth_panel.preview.configure(image=image_tk)
+        except Exception:
             return
 
-        self.total_frames += 1
-        self.current_frame = frame.copy()
+    def _update_map(self, frame, detections):
+        if not self.occupancy_grid or not update_grid_from_frame:
+            return
+        h, w = frame.shape[:2]
+        fx = self.default_focal_length_px
+        fy = self.default_focal_length_px
+        cx = w / 2.0
+        cy = h / 2.0
+        intrinsics = {"fx": fx, "fy": fy, "cx": cx, "cy": cy}
+        try:
+            if self.last_depth_map is None and self.depth_estimator:
+                self.last_depth_map = self.depth_estimator.predict(frame)
+            if self.last_depth_map is None:
+                return
+            update_grid_from_frame(
+                [{"bbox": det[0], "class_name": det[1]} for det in detections],
+                self.last_depth_map,
+                self.occupancy_grid,
+                intrinsics=intrinsics,
+                depth_scale_m=self.depth_scale_m,
+            )
+            if self.visual_odometry:
+                t0 = time.time()
+                self.last_pose, _ = self.visual_odometry.update(frame, depth_map=self.last_depth_map)
+                dt = max(time.time() - t0, 1e-6)
+                self.last_slam_fps = 1.0 / dt
+            if self.path_planner:
+                start = self.occupancy_grid.world_to_grid(self.last_pose[0], self.last_pose[1])
+                goal = self.occupancy_grid.world_to_grid(self.last_pose[0] + self.goal_distance_m, self.last_pose[1])
+                self.last_path = self.path_planner.plan(self.occupancy_grid, start, goal)
+            prob = self.occupancy_grid.to_prob()
+            img = (prob * 255.0).astype(np.uint8)
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+            # Draw path overlay if available
+            if self.last_path:
+                for i in range(1, len(self.last_path)):
+                    x1, y1 = self.last_path[i - 1]
+                    x2, y2 = self.last_path[i]
+                    cv2.line(img, (x1, y1), (x2, y2), (0, 255, 255), 1)
+            img = cv2.resize(img, (360, 160), interpolation=cv2.INTER_NEAREST)
+            image = Image.fromarray(img)
+            image_tk = ImageTk.PhotoImage(image=image)
+            self.map_panel.map_preview.image_tk = image_tk
+            self.map_panel.map_preview.configure(image=image_tk)
+        except Exception:
+            return
 
-        if self.recording and self.video_writer is not None:
-            self.video_writer.write(frame)
+    def _update_overlay_info(self, frame):
+        state_text = "ONLINE"
+        nav_text = self.last_movement_announcement or "GO STRAIGHT"
+        frame = self._draw_unicode_text(frame, f"FPS {self.last_fps:.1f}", 10, 25, (0, 255, 0))
+        frame = self._draw_unicode_text(frame, f"STATE {state_text}", 10, 50, (0, 255, 0))
+        self._draw_nav_arrow(frame, nav_text)
+        return frame
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        brightness = float(gray.mean())
-        blur_score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-
-        frame, detections = self._detect_real_objects(frame)
-        if detections:
-            first = detections[0]
-            self.last_detect_text = self._build_localized_object_phrase(first[1], first[2], (first[3], first[6]))
-            self.maybe_speak_display_text(self.last_detect_text)
+    def _draw_nav_arrow(self, frame, nav_text):
+        h, w = frame.shape[:2]
+        center = (int(w * 0.5), int(h * 0.15))
+        length = int(min(w, h) * 0.08)
+        if "LEFT" in nav_text.upper():
+            end = (center[0] - length, center[1])
+        elif "RIGHT" in nav_text.upper():
+            end = (center[0] + length, center[1])
         else:
-            self.last_detect_text = "No real objects yet"
-        self._refresh_detect_box()
+            end = (center[0], center[1] + length)
+        cv2.arrowedLine(frame, center, end, (0, 255, 255), 3, tipLength=0.4)
 
-        if self.test_active:
-            self.test_frames += 1
-            self.test_brightness_sum += brightness
-            self.test_blur_sum += blur_score
-            self._finish_test_if_needed()
+    def _read_gpu_usage(self):
+        try:
+            import subprocess
+            out = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
+                stderr=subprocess.DEVNULL,
+            )
+            val = out.decode("utf-8", "ignore").strip().splitlines()[0]
+            return f"{val}%"
+        except Exception:
+            return "N/A"
 
-        now = time.time()
-        dt = max(now - self.last_loop_time, 1e-6)
-        self.last_fps = 1.0 / dt
-        self.last_loop_time = now
+    def _format_uptime(self, seconds):
+        seconds = int(max(seconds, 0))
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"
 
-        display = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        display = cv2.resize(display, (900, 540))
-        image = Image.fromarray(display)
-        image_tk = ImageTk.PhotoImage(image=image)
-        self.preview.image_tk = image_tk
-        self.preview.configure(image=image_tk)
+    def toggle_pause(self):
+        self.paused = not self.paused
+        state = "Paused" if self.paused else "Running"
+        self.status_var.set(f"{state}")
 
-        self.metrics_var.set(
-            f"FPS: {self.last_fps:.1f} | Brightness: {brightness:.1f} | Blur: {blur_score:.1f}"
-        )
-        self.object_var.set(f"Objects: {self.last_detect_text}")
-        self.root.after(15, self.update_frame)
+    def pause_navigation(self):
+        self.toggle_pause()
+
+    def emergency_stop(self):
+        self.stop_camera()
 
     def save_snapshot(self):
         if self.current_frame is None:
@@ -874,10 +1461,25 @@ class CameraGUI:
         self.root.quit()
         self.root.destroy()
 
+    def _setup_logger(self):
+        log_path = os.environ.get("WVAB_GUI_LOG_PATH", "wvab_gui.log")
+        level = os.environ.get("WVAB_LOG_LEVEL", "INFO").upper()
+        logger = logging.getLogger("wvab_gui")
+        if logger.handlers:
+            return logger
+        logger.setLevel(getattr(logging, level, logging.INFO))
+        handler = RotatingFileHandler(log_path, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
+        formatter = logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        return logger
+
 
 def run_camera_gui(
     camera_source=0,
-    model_path="yolov8n.pt",
+    model_path=os.environ.get("WVAB_MODEL", "yolov8n.pt"),
     language="en",
     labels_path="multilingual_labels.common.json",
 ):
@@ -895,7 +1497,7 @@ def run_camera_gui(
 
 
 def main():
-    run_camera_gui(camera_source=0, model_path="yolov8n.pt", language="en")
+    run_camera_gui(camera_source=0, model_path=os.environ.get("WVAB_MODEL", "yolov8n.pt"), language="en")
 
 
 if __name__ == "__main__":

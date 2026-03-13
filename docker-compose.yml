@@ -1,0 +1,48 @@
+# --------------------------------------------------------------------------------------------- # 
+# | Name: Md. Shahanur Islam Shagor                                                           | # 
+# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
+# | Voronezh State University of Forestry and Technologies                                    | # 
+# | Build for Blind people within 15$                                                         | # 
+# --------------------------------------------------------------------------------------------- # 
+
+version: "3.8"
+
+services:
+  vision-server:
+    build: .
+    command: ["python", "vision_server.py"]
+    restart: always
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+
+  navigation-engine:
+    build: .
+    command: ["python", "navigation_pipeline.py"]
+    restart: always
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    ports:
+      - "8000:8000"
+
+  camera-stream:
+    build: .
+    command: ["python", "udp_streaming.py", "client", "--config", "wvab_config.sample.json"]
+    restart: always
+    volumes:
+      - ./logs:/app/logs
+
+  monitoring:
+    image: prom/prometheus
+    restart: always
+    volumes:
+      - ./deployment/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"

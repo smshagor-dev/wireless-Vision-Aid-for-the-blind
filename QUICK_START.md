@@ -1,9 +1,15 @@
-# WVAB Quick Start
+<!--
+Name: Md. Shahanur Islam Shagor
+Autonomous Systems & UAV Researcher | Cybersecurity Specialist | Software Engineer
+Voronezh State University of Forestry and Technologies
+Build for Blind people within 15$
+-->
 
-## 1) One-command startup (Linux/Raspberry Pi)
+# QUICK START
+
+## 1) Setup & Run
 
 ```bash
-chmod +x quick_start.sh
 ./quick_start.sh setup
 ./quick_start.sh doctor
 ./quick_start.sh run esp32
@@ -47,4 +53,3 @@ Or with g++ directly:
 g++ -std=c++17 -O2 -Icpp cpp/navigation_planner.cpp cpp/main_demo.cpp -o navigation_demo
 ./navigation_demo
 ```
-

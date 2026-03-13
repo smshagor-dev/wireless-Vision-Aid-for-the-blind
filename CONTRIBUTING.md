@@ -1,18 +1,11 @@
+<!--
+Name: Md. Shahanur Islam Shagor
+Autonomous Systems & UAV Researcher | Cybersecurity Specialist | Software Engineer
+Voronezh State University of Forestry and Technologies
+Build for Blind people within 15$
+-->
+
 # Contributing
-
-## Workflow
-1. Fork and clone repository.
-2. Create a feature branch.
-3. Make focused changes.
-4. Run tests locally.
-5. Open a pull request with clear description.
-
-## Branch naming
-- `feature/<name>`
-- `fix/<name>`
-- `docs/<name>`
-- `test/<name>`
-- `refactor/<name>`
 
 ## Local setup
 ```bash

@@ -1,0 +1,42 @@
+{
+  "env": {
+    "WVAB_UDP_ENCRYPT": "1",
+    "WVAB_UDP_AUTH": "1",
+    "WVAB_UDP_KEY_HEX": "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+    "WVAB_UDP_TOKEN": "change-me",
+    "WVAB_UDP_TRACKING": "1",
+    "WVAB_UDP_TRACK_IOU": "0.3",
+    "WVAB_UDP_TRACK_MAX_AGE_S": "1.0",
+    "WVAB_UDP_TRACK_MIN_HITS": "1",
+    "WVAB_UDP_HEALTH_INTERVAL_S": "5",
+    "WVAB_UDP_WATCHDOG_CHECK_S": "2"
+  },
+  "server_env": {
+    "WVAB_UDP_HEADLESS": "1",
+    "WVAB_UDP_HEALTH_PATH": "wvab_udp_server_health.json",
+    "WVAB_UDP_WATCHDOG_SERVER_IDLE_S": "30"
+  },
+  "client_env": {
+    "WVAB_UDP_HEALTH_PATH": "wvab_udp_client_health.json",
+    "WVAB_UDP_WATCHDOG_CLIENT_IDLE_S": "15"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 9999,
+    "model": "yolov8n.pt",
+    "language": "en",
+    "labels": "multilingual_labels.common.json",
+    "headless": true,
+    "auto_restart": true,
+    "restart_max": 5,
+    "restart_delay": 2.0
+  },
+  "client": {
+    "server_ip": "192.168.4.1",
+    "server_port": 9999,
+    "camera": "0",
+    "auto_restart": true,
+    "restart_max": 5,
+    "restart_delay": 2.0
+  }
+}

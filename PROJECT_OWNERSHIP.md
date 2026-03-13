@@ -1,8 +1,9 @@
-# Project Ownership & Intellectual Property Notice
-
-## Projects Covered
-
-This ownership declaration applies to the following projects:
+<!--
+Name: Md. Shahanur Islam Shagor
+Autonomous Systems & UAV Researcher | Cybersecurity Specialist | Software Engineer
+Voronezh State University of Forestry and Technologies
+Build for Blind people within 15$
+-->
 
 1. Wireless Vision-Aid for the Blind (WVAB)  
 

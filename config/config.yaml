@@ -5,19 +5,31 @@
 # | Build for Blind people within 15$                                                         | # 
 # --------------------------------------------------------------------------------------------- # 
 
-cmake_minimum_required(VERSION 3.12)
-project(wvab_navigation_planner CXX)
+mapping:
+  occupancy_grid:
+    width_m: 20.0
+    height_m: 20.0
+    resolution: 0.1
+    origin_x: -10.0
+    origin_y: -10.0
+  slam:
+    backend: orbslam3
+    command:
+      - ./ORB_SLAM3
+      - Mono
+      - /app/slam/ORBvoc.txt
+      - /app/slam/monocular.yaml
+      - /dev/video0
+    pose_file: /app/slam/pose.txt
+    map_points_file: /app/slam/map_points.txt
+    use_map_points: true
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+planning:
+  allow_diagonal: true
+  smooth_path: true
 
-add_library(navigation_planner navigation_planner.cpp)
-target_include_directories(navigation_planner PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-
-add_executable(navigation_demo main_demo.cpp)
-target_link_libraries(navigation_demo PRIVATE navigation_planner)
-
-if(WIN32)
-  add_executable(wvab_speaker speaker_cli.cpp)
-  target_link_libraries(wvab_speaker PRIVATE ole32 sapi)
-endif()
+navigation:
+  goal_source: file
+  goal_file: config/goal.json
+  fallback_goal_relative: [5.0, 0.0]
+  goal_distance_m: 5.0
