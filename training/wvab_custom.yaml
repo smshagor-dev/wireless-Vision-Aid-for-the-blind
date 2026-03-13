@@ -1,0 +1,33 @@
+# Custom WVAB dataset for road + room + outside
+path: data/custom_wvab
+train: images/train
+val: images/val
+
+names:
+  0: person
+  1: car
+  2: bus
+  3: truck
+  4: bicycle
+  5: motorcycle
+  6: traffic_light
+  7: stop_sign
+  8: crosswalk
+  9: curb
+  10: pothole
+  11: pole
+  12: road_cone
+  13: fan
+  14: door
+  15: chair
+  16: table
+  17: bed
+  18: sofa
+  19: bottle
+  20: cup
+  21: laptop
+  22: tv
+  23: stairs
+  24: window
+  25: wall
+  26: floor

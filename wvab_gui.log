@@ -1,0 +1,66 @@
+2026-03-13 11:03:43,266 | WARNING | wvab_gui | Overlay font not found; using default font.
+2026-03-13 11:07:59,973 | WARNING | wvab_gui | Overlay font not found; using default font.
+2026-03-13 12:51:04,796 | WARNING | wvab_gui | Overlay font not found; using default font.
+2026-03-13 13:19:45,281 | WARNING | wvab_gui | Overlay font not found; using default font.
+2026-03-13 13:19:48,561 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 13:23:57,955 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 13:23:58,659 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 13:27:24,520 | WARNING | wvab_gui | Overlay font not found; using default font.
+2026-03-13 13:27:25,257 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 17:59:02,120 | WARNING | wvab_gui | Overlay font not found; using default font.
+2026-03-13 17:59:02,859 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 18:00:47,973 | WARNING | wvab_gui | Overlay font not found; using default font.
+2026-03-13 18:00:48,790 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 20:55:06,907 | WARNING | wvab_gui | Overlay font not found; using default font.
+2026-03-13 20:55:07,717 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 20:57:16,910 | WARNING | wvab_gui | Overlay font not found; using default font.
+2026-03-13 20:57:17,624 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 20:59:21,611 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 20:59:22,348 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 21:01:06,203 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:01:07,021 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 21:03:17,761 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:03:18,104 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 21:05:39,037 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:05:39,842 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 21:07:20,645 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:07:21,440 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 21:11:26,437 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:11:27,151 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 21:14:18,570 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:14:25,501 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 21:15:59,370 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:16:00,113 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 21:17:03,526 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:17:04,222 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 21:18:34,990 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:18:41,818 | WARNING | wvab_gui | Depth model unavailable, using stub depth. No module named 'timm'
+2026-03-13 21:38:51,106 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:38:51,642 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-13 21:41:00,113 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:41:00,641 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-13 21:42:28,489 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:42:29,027 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-13 21:52:59,075 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 21:52:59,626 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-13 21:59:01,810 | WARNING | wvab_gui | Overlay font not found; using default font.
+2026-03-13 21:59:02,334 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-13 22:00:00,884 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 22:00:01,403 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-13 22:05:03,365 | WARNING | wvab_gui | Overlay font not found; using default font.
+2026-03-13 22:05:03,914 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-13 22:06:56,777 | WARNING | wvab_gui | Overlay font not found; using default font.
+2026-03-13 22:06:57,325 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-13 22:12:07,794 | INFO | wvab_gui | Overlay font loaded: C:\Users\Shagor\OneDrive\Desktop\Final Project\Wireless Vision-Aid for the Blind (WVAB)\assets\fonts\NotoSansBengali-Regular.ttf
+2026-03-13 22:12:08,341 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-13 22:17:37,899 | INFO | wvab_gui | Overlay font loaded: C:\Users\Shagor\OneDrive\Desktop\Final Project\Wireless Vision-Aid for the Blind (WVAB)\assets\fonts\NotoSansBengali-Regular.ttf
+2026-03-13 22:17:38,441 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-13 22:23:35,421 | INFO | wvab_gui | Overlay font loaded: C:\Users\Shagor\OneDrive\Desktop\Final Project\Wireless Vision-Aid for the Blind (WVAB)\assets\fonts\NotoSansBengali-Regular.ttf
+2026-03-13 22:23:35,954 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-13 22:27:04,019 | INFO | wvab_gui | Overlay font loaded: C:\Users\Shagor\OneDrive\Desktop\Final Project\Wireless Vision-Aid for the Blind (WVAB)\assets\fonts\NotoSansBengali-Regular.ttf
+2026-03-13 22:27:04,574 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-13 22:27:15,963 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 22:27:21,253 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 22:27:28,204 | INFO | wvab_gui | Overlay font loaded: C:\Users\Shagor\OneDrive\Desktop\Final Project\Wireless Vision-Aid for the Blind (WVAB)\assets\fonts\NotoSansBengali-Regular.ttf
+2026-03-13 22:27:33,153 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-13 22:27:39,875 | INFO | wvab_gui | Overlay font loaded: C:\Users\Shagor\OneDrive\Desktop\Final Project\Wireless Vision-Aid for the Blind (WVAB)\assets\fonts\NotoNaskhArabic-Regular.ttf

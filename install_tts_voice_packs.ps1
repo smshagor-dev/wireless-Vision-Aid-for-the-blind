@@ -64,7 +64,16 @@ function Show-InstalledVoices {
 
 try {
   Assert-Admin
+  # Support comma-separated single argument, e.g. "bn,hi,ar"
+  $expanded = @()
   foreach ($lang in $Languages) {
+    if ($lang -match ",") {
+      $expanded += $lang.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    } else {
+      $expanded += $lang
+    }
+  }
+  foreach ($lang in $expanded) {
     Install-LanguageWithSpeech -LangCode $lang -CopySettings:$CopyToSettings.IsPresent
   }
 

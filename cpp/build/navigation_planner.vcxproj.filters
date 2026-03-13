@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\Shagor\OneDrive\Desktop\Final Project\Wireless Vision-Aid for the Blind (WVAB)\cpp\navigation_planner.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\Shagor\OneDrive\Desktop\Final Project\Wireless Vision-Aid for the Blind (WVAB)\cpp\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{87FD8822-891C-3635-8858-B3B446CB9AC0}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

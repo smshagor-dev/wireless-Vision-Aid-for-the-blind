@@ -15,7 +15,7 @@ import numpy as np
 from offline_utils import configure_offline_env, ensure_local_model
 
 OFFLINE_MODE = configure_offline_env()
-NONINTERACTIVE = os.environ.get("WVAB_TEST_NONINTERACTIVE", "0") == "1"
+NONINTERACTIVE = os.environ.get("WVAB_TEST_NONINTERACTIVE", "0") == "1" or not sys.stdin.isatty()
 
 class WVABTester:
     """Comprehensive testing utility for WVAB system."""
@@ -122,7 +122,11 @@ class WVABTester:
                 if NONINTERACTIVE:
                     self.print_result("Audio Output", True, "Skipped (non-interactive)")
                     return True
-                user_input = input("Did you hear the audio? (y/n): ").strip().lower()
+                try:
+                    user_input = input("Did you hear the audio? (y/n): ").strip().lower()
+                except EOFError:
+                    self.print_result("Audio Output", True, "Skipped (EOF)")
+                    return True
                 heard_audio = user_input == "y"
                 self.print_result("Audio Output", heard_audio)
                 return heard_audio
@@ -279,6 +283,9 @@ class WVABTester:
     ):
         """Launch real GUI camera test and keep running until user closes it."""
         self.print_header("Testing Camera GUI (Real Continuous Test)")
+        if NONINTERACTIVE:
+            self.print_result("Camera GUI Session", True, "Skipped (non-interactive)")
+            return True
         try:
             from camera_gui import run_camera_gui
 
@@ -495,7 +502,10 @@ def main():
     if NONINTERACTIVE:
         choice = "4"
     else:
-        choice = input("\nEnter choice (1-4): ").strip()
+        try:
+            choice = input("\nEnter choice (1-4): ").strip()
+        except EOFError:
+            choice = "4"
     url = ""
     labels_path = "multilingual_labels.common.json"
 
@@ -504,7 +514,13 @@ def main():
         print("\nSelect test language:")
         for idx, lang in enumerate(available_languages, start=1):
             print(f"{idx}. {lang}")
-        lang_choice = input(f"Enter choice (1-{len(available_languages)}): ").strip()
+        if NONINTERACTIVE:
+            lang_choice = "1"
+        else:
+            try:
+                lang_choice = input(f"Enter choice (1-{len(available_languages)}): ").strip()
+            except EOFError:
+                lang_choice = "1"
         try:
             lang_idx = int(lang_choice) - 1
         except ValueError:

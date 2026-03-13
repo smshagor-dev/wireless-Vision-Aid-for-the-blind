@@ -187,7 +187,7 @@ class MapPanel(Panel):
 
 
 class StatusBar(Panel):
-    def __init__(self, parent):
+    def __init__(self, parent, audio_var=None):
         super().__init__(parent, "System Status")
         self.leds = {}
         for label in ("AI ACTIVE", "SLAM ACTIVE", "DOCKER READY", "STREAMING ACTIVE"):
@@ -204,7 +204,7 @@ class StatusBar(Panel):
         tk.Label(self, textvariable=self.risk_var, fg=COLORS["warning"], bg=COLORS["panel"], font=("Segoe UI", 10, "bold")).pack(
             anchor="w", padx=12, pady=(6, 2)
         )
-        self.audio_var = tk.StringVar(value='Audio: "..."')
+        self.audio_var = audio_var if audio_var is not None else tk.StringVar(value='Audio: "..."')
         tk.Label(self, textvariable=self.audio_var, fg=COLORS["accent"], bg=COLORS["panel"], font=("Segoe UI", 10)).pack(
             anchor="w", padx=12, pady=(8, 4)
         )
@@ -281,6 +281,7 @@ class CameraGUI:
         self.last_fps = 0.0
         self.start_time = time.time()
         self.paused = False
+        self.status_var = tk.StringVar(value="Initializing...")
         self.sys_status_var = tk.StringVar(value="OFFLINE")
         self.uptime_var = tk.StringVar(value="00:00:00")
         self.model_status_var = tk.StringVar(value="Model: Not loaded")
@@ -316,8 +317,18 @@ class CameraGUI:
         self.tts_thread.start()
         self.last_spoken_text = ""
         self.overlay_font = self._load_overlay_font()
-        self.depth_estimator = DepthEstimator(model_name="midas_small", device="auto", logger=self.logger) if DepthEstimator else None
-        self.depth_every_n = 3
+        self.unicode_overlay_ok = self.overlay_font is not None
+        self.overlay_language = self.language if self.unicode_overlay_ok else "en"
+        self.depth_estimator = DepthEstimator(model_name="midas_small", device="auto", logger=self.logger, trust_repo=True) if DepthEstimator else None
+        self.depth_error_shown = False
+        if self.depth_estimator and getattr(self.depth_estimator, "model", None) is None:
+            err = getattr(self.depth_estimator, "last_error", None)
+            if err:
+                self.status_var.set(f"Depth unavailable: {err}")
+                self.depth_error_shown = True
+        self.depth_every_n = 6
+        self.map_every_n = 4
+        self.map_frame_count = 0
         self.depth_frame_count = 0
         self.last_depth_map = None
         self.occupancy_grid = None
@@ -332,9 +343,10 @@ class CameraGUI:
             self.path_planner = PathPlanner(allow_diagonal=True, smooth=True)
 
         self._build_ui()
+        # Start in windowed mode; allow users to toggle manually if desired.
+        self.root.attributes("-fullscreen", False)
         self.source_var.set(str(camera_source))
         self._load_model()
-        self._startup_wizard()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.auto_restart = True
 
@@ -359,8 +371,9 @@ class CameraGUI:
         main.grid_rowconfigure(0, weight=1)
         main.grid_rowconfigure(1, weight=0)
 
-        left = tk.Frame(main, bg=COLORS["background"])
+        left = tk.Frame(main, bg=COLORS["background"], width=260)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        left.grid_propagate(False)
         left.grid_columnconfigure(0, weight=1)
         left.grid_rowconfigure(1, weight=1)
 
@@ -381,8 +394,9 @@ class CameraGUI:
         self.camera_panel.grid(row=0, column=0, sticky="nsew")
         self.preview = self.camera_panel.preview
 
-        right = tk.Frame(main, bg=COLORS["background"])
+        right = tk.Frame(main, bg=COLORS["background"], width=280)
         right.grid(row=0, column=2, sticky="nsew")
+        right.grid_propagate(False)
         right.grid_rowconfigure(2, weight=1)
         right.grid_columnconfigure(0, weight=1)
 
@@ -407,29 +421,76 @@ class CameraGUI:
         self.map_panel = MapPanel(bottom)
         self.map_panel.grid(row=0, column=0, sticky="ew")
         self.map_preview = self.map_panel.map_preview
-        self.status_bar = StatusBar(bottom)
+        self.status_bar = StatusBar(bottom, audio_var=self.audio_msg_var)
         self.status_bar.grid(row=0, column=1, sticky="ew", padx=(12, 0))
         self.status_var = tk.StringVar(value="Idle")
         self.object_var = tk.StringVar(value="Objects: No real objects yet")
-        self.status_bar.audio_var = self.audio_msg_var
 
-        controls = tk.Frame(self.root, bg=COLORS["background"])
-        controls.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 10))
-        tk.Label(controls, text="Camera Source (0 / URL):", fg=COLORS["muted"], bg=COLORS["background"]).pack(side=tk.LEFT)
+        controls = tk.Frame(
+            self.root,
+            bg=COLORS["panel"],
+            highlightbackground=COLORS["border"],
+            highlightthickness=1,
+        )
+        controls.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 16))
+        tk.Label(
+            controls,
+            text="WVAB Control Bar",
+            fg=COLORS["muted"],
+            bg=COLORS["panel"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side=tk.LEFT, padx=10)
+        tk.Label(
+            controls,
+            text="Camera Source (0 / URL):",
+            fg=COLORS["muted"],
+            bg=COLORS["panel"],
+        ).pack(side=tk.LEFT, padx=(6, 0))
         self.source_var = tk.StringVar(value="0")
-        tk.Entry(controls, textvariable=self.source_var, width=35).pack(side=tk.LEFT, padx=6)
-        tk.Button(controls, text="Real Test (5s)", command=self.start_real_test).pack(side=tk.LEFT, padx=4)
-        tk.Button(controls, text="Snapshot", command=self.save_snapshot).pack(side=tk.LEFT, padx=4)
-        tk.Button(controls, text="Record", command=self.toggle_recording).pack(side=tk.LEFT, padx=4)
-        self.ml_btn = tk.Button(controls, text="ML: OFF", command=self.toggle_ml)
-        self.ml_btn.pack(side=tk.LEFT, padx=4)
-        self.audio_btn = tk.Button(controls, text="Audio: ON", command=self.toggle_audio)
-        self.audio_btn.pack(side=tk.LEFT, padx=4)
-        tk.Label(controls, text="Lang:", fg=COLORS["muted"], bg=COLORS["background"]).pack(side=tk.LEFT, padx=(10, 3))
+        tk.Entry(
+            controls,
+            textvariable=self.source_var,
+            width=32,
+            bg=COLORS["background"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+        ).pack(side=tk.LEFT, padx=6, pady=8)
+
+        btn_style = {
+            "bg": COLORS["border"],
+            "fg": COLORS["text"],
+            "activebackground": COLORS["accent"],
+            "activeforeground": "#0B0F16",
+            "relief": "flat",
+            "padx": 10,
+            "pady": 4,
+        }
+        primary_style = {**btn_style, "bg": COLORS["accent"], "fg": "#0B0F16"}
+        danger_style = {**btn_style, "bg": COLORS["danger"], "fg": "white"}
+
+        tk.Button(controls, text="Real Test (5s)", command=self.start_real_test, **primary_style).pack(
+            side=tk.LEFT, padx=4, pady=6
+        )
+        tk.Button(controls, text="Snapshot", command=self.save_snapshot, **btn_style).pack(
+            side=tk.LEFT, padx=4, pady=6
+        )
+        tk.Button(controls, text="Record", command=self.toggle_recording, **btn_style).pack(
+            side=tk.LEFT, padx=4, pady=6
+        )
+        self.ml_btn = tk.Button(controls, text="ML: OFF", command=self.toggle_ml, **btn_style)
+        self.ml_btn.pack(side=tk.LEFT, padx=4, pady=6)
+        self.audio_btn = tk.Button(controls, text="Audio: ON", command=self.toggle_audio, **btn_style)
+        self.audio_btn.pack(side=tk.LEFT, padx=4, pady=6)
+        tk.Button(controls, text="Test Audio", command=self.test_audio, **btn_style).pack(
+            side=tk.LEFT, padx=4, pady=6
+        )
+        tk.Label(controls, text="Lang:", fg=COLORS["muted"], bg=COLORS["panel"]).pack(side=tk.LEFT, padx=(10, 3))
         self.lang_var = tk.StringVar(value=self.language)
         self.lang_menu = tk.OptionMenu(controls, self.lang_var, *self.available_languages, command=self.set_language)
-        self.lang_menu.pack(side=tk.LEFT, padx=2)
-        tk.Button(controls, text="Exit", command=self.on_close).pack(side=tk.RIGHT, padx=4)
+        self.lang_menu.configure(bg=COLORS["border"], fg=COLORS["text"], activebackground=COLORS["accent"])
+        self.lang_menu.pack(side=tk.LEFT, padx=2, pady=6)
+        tk.Button(controls, text="Exit", command=self.on_close, **danger_style).pack(side=tk.RIGHT, padx=8, pady=6)
 
     def _load_config(self):
         try:
@@ -444,53 +505,6 @@ class CameraGUI:
                 return default
             data = data.get(key)
         return default if data is None else data
-
-    def _startup_wizard(self):
-        wizard = tk.Toplevel(self.root)
-        wizard.title("Startup Setup")
-        wizard.configure(bg=COLORS["background"])
-        wizard.resizable(False, False)
-        wizard.grab_set()
-
-        tk.Label(wizard, text="WVAB Startup Setup", fg=COLORS["text"], bg=COLORS["background"],
-                 font=("Segoe UI", 14, "bold")).pack(padx=16, pady=(16, 8))
-
-        # Audio test
-        audio_frame = tk.Frame(wizard, bg=COLORS["background"])
-        audio_frame.pack(fill=tk.X, padx=16, pady=6)
-        tk.Label(audio_frame, text="Audio Test:", fg=COLORS["muted"], bg=COLORS["background"]).pack(side=tk.LEFT)
-        tk.Button(audio_frame, text="Play Test", command=lambda: self.speak("Audio test")).pack(side=tk.LEFT, padx=8)
-
-        # Camera select
-        cam_frame = tk.Frame(wizard, bg=COLORS["background"])
-        cam_frame.pack(fill=tk.X, padx=16, pady=6)
-        tk.Label(cam_frame, text="Camera Source:", fg=COLORS["muted"], bg=COLORS["background"]).pack(side=tk.LEFT)
-        cam_var = tk.StringVar(value=self.source_var.get())
-        tk.Entry(cam_frame, textvariable=cam_var, width=30).pack(side=tk.LEFT, padx=8)
-
-        # Language select
-        lang_frame = tk.Frame(wizard, bg=COLORS["background"])
-        lang_frame.pack(fill=tk.X, padx=16, pady=6)
-        tk.Label(lang_frame, text="Language:", fg=COLORS["muted"], bg=COLORS["background"]).pack(side=tk.LEFT)
-        lang_var = tk.StringVar(value=self.language)
-        tk.OptionMenu(lang_frame, lang_var, *self.available_languages).pack(side=tk.LEFT, padx=8)
-
-        # Buttons
-        btn_frame = tk.Frame(wizard, bg=COLORS["background"])
-        btn_frame.pack(padx=16, pady=16, fill=tk.X)
-        def on_ok():
-            self.source_var.set(cam_var.get().strip() or "0")
-            self.lang_var.set(lang_var.get().strip() or "en")
-            self.set_language(self.lang_var.get())
-            wizard.destroy()
-            self.root.attributes("-fullscreen", True)
-            self.start_camera()
-
-        def on_cancel():
-            wizard.destroy()
-
-        tk.Button(btn_frame, text="OK", bg=COLORS["success"], fg="white", command=on_ok).pack(side=tk.LEFT, padx=8)
-        tk.Button(btn_frame, text="Cancel", bg=COLORS["danger"], fg="white", command=on_cancel).pack(side=tk.LEFT)
 
     def _on_resize(self, _event):
         if self.preview is None:
@@ -575,7 +589,7 @@ class CameraGUI:
         installed = self._detect_tts_languages()
         if requested_language in installed:
             return requested_language
-        return "en"
+        return requested_language
 
     def _detect_available_languages(self, labels):
         langs = {"en"}
@@ -593,23 +607,29 @@ class CameraGUI:
             lang = "en"
         self.language = lang
         self.speech_language = self._resolve_speech_language(lang)
-        if self.speech_language != self.language:
+        self.overlay_font = self._load_overlay_font()
+        self.unicode_overlay_ok = self.overlay_font is not None
+        self.overlay_language = self.language if self.unicode_overlay_ok else "en"
+        installed = self._detect_tts_languages()
+        if self.language not in installed:
             self.status_var.set(
-                f"Language: {self.language}, speech fallback: {self.speech_language} (voice not installed)"
+                f"Language set to: {self.language} (voice not installed, will attempt with default voice)"
             )
         else:
             self.status_var.set(f"Language set to: {self.language}")
 
-    def translate_class_name(self, class_name, fallback_name):
+    def translate_class_name(self, class_name, fallback_name, lang=None):
+        lang = (lang or self.language).strip().lower()
         entry = self.multilingual_labels.get(class_name)
         if isinstance(entry, dict):
-            return entry.get(self.language, entry.get("en", fallback_name))
+            return entry.get(lang, entry.get("en", fallback_name))
         return fallback_name
 
-    def _localized_direction(self, direction):
+    def _localized_direction(self, direction, lang=None):
+        lang = (lang or self.language).strip().lower()
         phrases = self.multilingual_labels.get("__phrases__", {})
         if isinstance(phrases, dict):
-            lang_map = phrases.get(self.language, {})
+            lang_map = phrases.get(lang, {})
             if isinstance(lang_map, dict):
                 maybe = lang_map.get(direction)
                 if isinstance(maybe, str) and maybe.strip():
@@ -619,13 +639,14 @@ class CameraGUI:
             "ru": {"left": "слева", "right": "справа", "in front": "спереди"},
             "bn": {"left": "বামে", "right": "ডানে", "in front": "সামনে"},
         }
-        table = dmap.get(self.language, dmap["en"])
+        table = dmap.get(lang, dmap["en"])
         return table.get(direction, direction)
 
-    def _localized_distance(self, distance):
+    def _localized_distance(self, distance, lang=None):
+        lang = (lang or self.language).strip().lower()
         phrases = self.multilingual_labels.get("__phrases__", {})
         if isinstance(phrases, dict):
-            lang_map = phrases.get(self.language, {})
+            lang_map = phrases.get(lang, {})
             if isinstance(lang_map, dict):
                 maybe = lang_map.get(distance)
                 if isinstance(maybe, str) and maybe.strip():
@@ -635,18 +656,85 @@ class CameraGUI:
             "ru": {"too far": "далеко", "close": "близко", "very close": "очень близко"},
             "bn": {"too far": "দূরে", "close": "কাছে", "very close": "খুব কাছে"},
         }
-        table = dmap.get(self.language, dmap["en"])
+        table = dmap.get(lang, dmap["en"])
         return table.get(distance, distance)
 
-    def _build_localized_object_phrase(self, object_name, direction, distance):
+    def _build_localized_object_phrase(self, object_name, direction, distance, lang=None):
+        lang = (lang or self.language).strip().lower()
         if isinstance(distance, tuple):
             distance_label, _distance_m = distance
         else:
             distance_label, _distance_m = distance, None
-        text = f"{object_name} {self._localized_direction(direction)}"
-        if distance_label in ("close", "very close"):
-            text = f"{text} {self._localized_distance(distance_label)}"
+        text = f"{object_name} {self._localized_direction(direction, lang=lang)}"
+        if _distance_m is not None:
+            if _distance_m <= 1.0:
+                text = f"{text} {self._localized_distance('very close', lang=lang)} {self._localized_number(1, lang)} {self._localized_meter(lang)}"
+            else:
+                bucket = self._bucket_distance_m(_distance_m)
+                if bucket is not None:
+                    text = f"{text} {self._localized_number(bucket, lang)} {self._localized_meter(lang)}"
+        else:
+            fallback_bucket = None
+            if distance_label == "very close":
+                text = f"{text} {self._localized_distance('very close', lang=lang)} {self._localized_number(1, lang)} {self._localized_meter(lang)}"
+            elif distance_label == "close":
+                fallback_bucket = 5
+            elif distance_label == "too far":
+                fallback_bucket = 15
+            if fallback_bucket is not None:
+                text = f"{text} {self._localized_number(fallback_bucket, lang)} {self._localized_meter(lang)}"
+            elif distance_label in ("close", "very close"):
+                text = f"{text} {self._localized_distance(distance_label, lang=lang)}"
         return text
+
+    def _localized_meter(self, lang):
+        lang = (lang or self.language).strip().lower()
+        meter_map = {
+            "en": "meter",
+            "ru": "метр",
+            "bn": "মিটার",
+            "hi": "मीटर",
+            "es": "metro",
+            "fr": "mètre",
+            "ar": "متر",
+        }
+        return meter_map.get(lang, "meter")
+
+    def _localized_number(self, value, lang):
+        lang = (lang or self.language).strip().lower()
+        num_map = {
+            "en": {1: "1", 5: "5", 10: "10", 15: "15", 20: "20", 25: "25", 30: "30", 40: "40", 50: "50", 75: "75", 100: "100"},
+            "ru": {1: "adin", 5: "peyet", 10: "decit", 15: "pitnatchet", 20: "dbaset", 25: "dbasetpeyet", 30: "treeset", 40: "sorok", 50: "pitdisat", 75: "siyamdisatpayat", 100: "sto"},
+            "bn": {1: "এক", 5: "পাঁচ", 10: "দশ", 15: "পনেরো", 20: "বিশ", 25: "পঁচিশ", 30: "ত্রিশ", 40: "চল্লিশ", 50: "পঞ্চাশ", 75: "পঁচাত্তর", 100: "একশ"},
+            "hi": {1: "एक", 5: "पांच", 10: "दस", 15: "पंद्रह", 20: "बीस", 25: "पच्चीस", 30: "तीस", 40: "चालीस", 50: "पचास", 75: "पचहत्तर", 100: "सौ"},
+            "es": {1: "uno", 5: "cinco", 10: "diez", 15: "quince", 20: "veinte", 25: "veinticinco", 30: "treinta", 40: "cuarenta", 50: "cincuenta", 75: "setenta y cinco", 100: "cien"},
+            "fr": {1: "un", 5: "cinq", 10: "dix", 15: "quinze", 20: "vingt", 25: "vingt-cinq", 30: "trente", 40: "quarante", 50: "cinquante", 75: "soixante-quinze", 100: "cent"},
+            "ar": {1: "واحد", 5: "خمسة", 10: "عشرة", 15: "خمسة عشر", 20: "عشرون", 25: "خمسة وعشرون", 30: "ثلاثون", 40: "أربعون", 50: "خمسون", 75: "خمسة وسبعون", 100: "مئة"},
+        }
+        return num_map.get(lang, num_map["en"]).get(value, str(value))
+
+    def _build_speech_phrase(self, detection, lang=None):
+        lang = (lang or self.language).strip().lower()
+        class_name, _pretty_name, direction, distance_label, _conf, _bbox, distance_m = detection
+        default_name = self.object_labels.get(class_name, class_name.replace("_", " ").strip().title())
+        name = self.translate_class_name(class_name, default_name, lang=lang)
+        dir_text = self._localized_direction(direction, lang=lang)
+        meter_text = self._localized_meter(lang)
+        if distance_m is not None and distance_m <= 1.0:
+            dist_text = self._localized_distance("very close", lang=lang)
+            return f"{name} {dir_text} {dist_text} {self._localized_number(1, lang)} {meter_text}"
+        if distance_m is not None:
+            bucket = self._bucket_distance_m(distance_m)
+            if bucket is not None:
+                return f"{name} {dir_text} {self._localized_number(bucket, lang)} {meter_text}"
+        if distance_label == "very close":
+            dist_text = self._localized_distance("very close", lang=lang)
+            return f"{name} {dir_text} {dist_text} {self._localized_number(1, lang)} {meter_text}"
+        if distance_label == "close":
+            return f"{name} {dir_text} {self._localized_number(5, lang)} {meter_text}"
+        if distance_label == "too far":
+            return f"{name} {dir_text} {self._localized_number(15, lang)} {meter_text}"
+        return f"{name} {dir_text}"
 
     def _overlay_safe_text(self, text):
         try:
@@ -666,6 +754,7 @@ class CameraGUI:
         lang = (self.language or "en").lower()
         if lang.startswith("bn"):
             font_candidates += [
+                os.path.join(os.path.dirname(__file__), "assets", "fonts", "NotoSansBengali-Regular.ttf"),
                 "C:/Windows/Fonts/Nirmala.ttf",
                 "C:/Windows/Fonts/kalpurush.ttf",
                 "/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf",
@@ -673,8 +762,19 @@ class CameraGUI:
             ]
         elif lang.startswith("hi"):
             font_candidates += [
+                os.path.join(os.path.dirname(__file__), "assets", "fonts", "NotoSansDevanagari-Regular.ttf"),
                 "C:/Windows/Fonts/Mangal.ttf",
+                "C:/Windows/Fonts/Nirmala.ttf",
                 "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+            ]
+        elif lang.startswith("ar"):
+            font_candidates += [
+                os.path.join(os.path.dirname(__file__), "assets", "fonts", "NotoNaskhArabic-Regular.ttf"),
+                "C:/Windows/Fonts/arialuni.ttf",
+                "C:/Windows/Fonts/Traditional Arabic.ttf",
+                "C:/Windows/Fonts/arial.ttf",
+                "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
             ]
         elif lang.startswith("ru"):
             font_candidates += [
@@ -705,6 +805,14 @@ class CameraGUI:
 
     def _draw_unicode_text(self, frame, text, x, y, color_bgr):
         if self.overlay_font is None:
+            cv2.putText(frame, self._overlay_safe_text(text), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_bgr, 2)
+            return frame
+        try:
+            mask = self.overlay_font.getmask(text)
+            if mask is None or mask.getbbox() is None:
+                cv2.putText(frame, self._overlay_safe_text(text), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_bgr, 2)
+                return frame
+        except Exception:
             cv2.putText(frame, self._overlay_safe_text(text), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_bgr, 2)
             return frame
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -804,6 +912,7 @@ class CameraGUI:
                 self.last_spoken_text = text
             except Exception as exc:
                 self.logger.exception("[AUDIO][GUI] speech failed")
+                self._set_status_threadsafe("Audio failed. Check TTS/voices or audio device.")
                 time.sleep(0.05)
 
     def speak(self, text):
@@ -841,6 +950,19 @@ class CameraGUI:
         self.audio_btn.configure(text=f"Audio: {'ON' if self.audio_enabled else 'OFF'}")
         self.session_summary["audio_enabled"] = self.audio_enabled
         self.status_var.set(f"Audio guidance {'enabled' if self.audio_enabled else 'disabled'}")
+
+    def _set_status_threadsafe(self, text):
+        try:
+            self.root.after(0, lambda: self.status_var.set(text))
+        except Exception:
+            pass
+
+    def test_audio(self):
+        if not self.audio_enabled:
+            self.status_var.set("Audio is OFF. Turn it ON first.")
+            return
+        self.status_var.set("Audio test queued")
+        self.speak_priority("Audio test")
 
     def toggle_ml(self):
         if self.model is None:
@@ -926,6 +1048,31 @@ class CameraGUI:
             return "close", None
         return "too far", None
 
+    def _bucket_distance_m(self, distance_m):
+        if distance_m is None:
+            return None
+        if distance_m <= 5.0:
+            return 5
+        if distance_m <= 10.0:
+            return 10
+        if distance_m <= 15.0:
+            return 15
+        if distance_m <= 20.0:
+            return 20
+        if distance_m <= 25.0:
+            return 25
+        if distance_m <= 30.0:
+            return 30
+        if distance_m <= 40.0:
+            return 40
+        if distance_m <= 50.0:
+            return 50
+        if distance_m <= 75.0:
+            return 75
+        if distance_m <= 100.0:
+            return 100
+        return 100
+
     def _detect_real_objects(self, frame):
         if not self.ml_enabled or self.model is None:
             return frame, []
@@ -934,17 +1081,19 @@ class CameraGUI:
         frame_keys = set()
         speech_candidates = []
         frame_h, frame_w = frame.shape[:2]
-        # Downscale for faster inference
-        infer_frame = cv2.resize(frame, (640, 360))
+        # Use full-resolution frame to avoid bbox scale mismatch and improve accuracy
+        infer_frame = frame
         device = self.yolo_device or "cpu"
+        conf_thresh = float(self._cfg("camera.yolo.conf", 0.5))
+        imgsz = int(self._cfg("camera.yolo.imgsz", 640))
         try:
-            results = self.model(infer_frame, imgsz=320, verbose=False, device=device)
+            results = self.model(infer_frame, imgsz=imgsz, verbose=False, device=device)
         except Exception:
-            results = self.model(infer_frame, imgsz=320, verbose=False)
+            results = self.model(infer_frame, imgsz=imgsz, verbose=False)
         for result in results:
             for box in result.boxes:
                 conf = float(box.conf[0])
-                if conf < 0.4:
+                if conf < conf_thresh:
                     continue
 
                 class_id = int(box.cls[0])
@@ -956,12 +1105,13 @@ class CameraGUI:
                 default_name = self.object_labels.get(
                     class_name, class_name.replace("_", " ").strip().title()
                 )
-                pretty_name = self.translate_class_name(class_name, default_name)
+                pretty_name = self.translate_class_name(class_name, default_name, lang=self.overlay_language)
                 distance_suffix = f", {distance_m:.1f}m" if distance_m is not None else ""
 
                 label = (
                     f"{pretty_name} {conf:.2f} "
-                    f"{self._localized_direction(direction)} {self._localized_distance(distance)}{distance_suffix}"
+                    f"{self._localized_direction(direction, lang=self.overlay_language)} "
+                    f"{self._localized_distance(distance, lang=self.overlay_language)}{distance_suffix}"
                 )
                 color = (0, 0, 255) if distance == "very close" else (0, 255, 0)
                 cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
@@ -1166,8 +1316,11 @@ class CameraGUI:
             frame = self._update_overlay_info(frame)
             if detections:
                 first = detections[0]
-                self.last_detect_text = self._build_localized_object_phrase(first[1], first[2], (first[3], first[6]))
-                self.maybe_speak_display_text(self.last_detect_text)
+                self.last_detect_text = self._build_localized_object_phrase(
+                    first[1], first[2], (first[3], first[6]), lang=self.overlay_language
+                )
+                speech_text = self._build_speech_phrase(first, lang=self.language)
+                self.maybe_speak_display_text(speech_text)
             else:
                 self.last_detect_text = "No real objects yet"
             if detections and any(d[2] in ("very close", "close") for d in detections):
@@ -1207,7 +1360,7 @@ class CameraGUI:
                 f"Camera FPS: {cam_fps:.1f} | SLAM FPS: {slam_fps} | CPU: {cpu if cpu is not None else 'N/A'}% | GPU: {gpu} | RAM: {ram if ram is not None else 'N/A'}%"
             )
             self.object_var.set(f"Objects: {self.last_detect_text}")
-            self.audio_msg_var.set(f'Audio: "{self.last_detect_text}"')
+            self.audio_msg_var.set(f'Audio: "{speech_text if detections else self.last_detect_text}"')
             self.sys_status_var.set("ONLINE")
             self.uptime_var.set(self._format_uptime(time.time() - self.start_time))
             self.root.after(15, self.update_frame)
@@ -1225,8 +1378,42 @@ class CameraGUI:
         try:
             depth_map = self.depth_estimator.predict(frame)
             self.last_depth_map = depth_map
-            depth_norm = (depth_map * 255.0).clip(0, 255).astype(np.uint8)
-            depth_color = cv2.applyColorMap(depth_norm, cv2.COLORMAP_TURBO)
+            if depth_map is None:
+                if not self.depth_error_shown:
+                    err = getattr(self.depth_estimator, "last_error", None)
+                    msg = "Depth unavailable"
+                    if err:
+                        msg = f"Depth unavailable: {err}"
+                    self.status_var.set(msg)
+                    self.depth_error_shown = True
+                depth_color = np.zeros((140, 240, 3), dtype=np.uint8)
+                depth_color[:] = (25, 25, 25)
+                cv2.putText(
+                    depth_color,
+                    "Depth unavailable",
+                    (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (200, 200, 200),
+                    1,
+                    cv2.LINE_AA,
+                )
+            elif float(np.std(depth_map)) < 1e-6:
+                depth_color = np.zeros((140, 240, 3), dtype=np.uint8)
+                depth_color[:] = (25, 25, 25)
+                cv2.putText(
+                    depth_color,
+                    "Depth unavailable",
+                    (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (200, 200, 200),
+                    1,
+                    cv2.LINE_AA,
+                )
+            else:
+                depth_norm = (depth_map * 255.0).clip(0, 255).astype(np.uint8)
+                depth_color = cv2.applyColorMap(depth_norm, cv2.COLORMAP_TURBO)
             preview = cv2.resize(depth_color, (240, 140))
             preview = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
             image = Image.fromarray(preview)
@@ -1238,6 +1425,25 @@ class CameraGUI:
 
     def _update_map(self, frame, detections):
         if not self.occupancy_grid or not update_grid_from_frame:
+            img = np.zeros((160, 360, 3), dtype=np.uint8)
+            img[:] = (20, 20, 24)
+            cv2.putText(
+                img,
+                "Map unavailable",
+                (10, 90),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (180, 180, 180),
+                1,
+                cv2.LINE_AA,
+            )
+            image = Image.fromarray(img)
+            image_tk = ImageTk.PhotoImage(image=image)
+            self.map_panel.map_preview.image_tk = image_tk
+            self.map_panel.map_preview.configure(image=image_tk)
+            return
+        self.map_frame_count += 1
+        if self.map_frame_count % self.map_every_n != 0:
             return
         h, w = frame.shape[:2]
         fx = self.default_focal_length_px
@@ -1249,6 +1455,22 @@ class CameraGUI:
             if self.last_depth_map is None and self.depth_estimator:
                 self.last_depth_map = self.depth_estimator.predict(frame)
             if self.last_depth_map is None:
+                img = np.zeros((160, 360, 3), dtype=np.uint8)
+                img[:] = (20, 20, 24)
+                cv2.putText(
+                    img,
+                    "Depth unavailable",
+                    (10, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (180, 180, 180),
+                    1,
+                    cv2.LINE_AA,
+                )
+                image = Image.fromarray(img)
+                image_tk = ImageTk.PhotoImage(image=image)
+                self.map_panel.map_preview.image_tk = image_tk
+                self.map_panel.map_preview.configure(image=image_tk)
                 return
             update_grid_from_frame(
                 [{"bbox": det[0], "class_name": det[1]} for det in detections],
@@ -1267,14 +1489,41 @@ class CameraGUI:
                 goal = self.occupancy_grid.world_to_grid(self.last_pose[0] + self.goal_distance_m, self.last_pose[1])
                 self.last_path = self.path_planner.plan(self.occupancy_grid, start, goal)
             prob = self.occupancy_grid.to_prob()
-            img = (prob * 255.0).astype(np.uint8)
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+            grid = (prob * 255.0).astype(np.uint8)
+            img = cv2.cvtColor(grid, cv2.COLOR_GRAY2RGB)
+            h, w = img.shape[:2]
+
+            # Subtle grid overlay
+            step = 10
+            for x in range(0, w, step):
+                cv2.line(img, (x, 0), (x, h), (40, 40, 48), 1)
+            for y in range(0, h, step):
+                cv2.line(img, (0, y), (w, y), (40, 40, 48), 1)
+
             # Draw path overlay if available
             if self.last_path:
                 for i in range(1, len(self.last_path)):
                     x1, y1 = self.last_path[i - 1]
                     x2, y2 = self.last_path[i]
-                    cv2.line(img, (x1, y1), (x2, y2), (0, 255, 255), 1)
+                    cv2.line(img, (x1, y1), (x2, y2), (0, 255, 255), 2)
+
+            # Draw start and goal markers
+            if self.last_path:
+                sx, sy = self.last_path[0]
+                gx, gy = self.last_path[-1]
+                cv2.circle(img, (sx, sy), 4, (0, 255, 0), -1)
+                cv2.circle(img, (gx, gy), 4, (255, 80, 80), -1)
+            # Draw current pose at center
+            cx = int(w / 2)
+            cy = int(h / 2)
+            cv2.circle(img, (cx, cy), 3, (120, 200, 255), -1)
+
+            # Add legend
+            cv2.rectangle(img, (6, 6), (120, 46), (15, 15, 18), -1)
+            cv2.putText(img, "Path", (12, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+            cv2.putText(img, "Start", (12, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+            cv2.putText(img, "Goal", (12, 44), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 80, 80), 1)
+
             img = cv2.resize(img, (360, 160), interpolation=cv2.INTER_NEAREST)
             image = Image.fromarray(img)
             image_tk = ImageTk.PhotoImage(image=image)

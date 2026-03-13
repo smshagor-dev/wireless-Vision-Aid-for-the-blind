@@ -1,0 +1,5 @@
+C:/Users/Shagor/OneDrive/Desktop/Final Project/Wireless Vision-Aid for the Blind (WVAB)/cpp/build/CMakeFiles/navigation_planner.dir
+C:/Users/Shagor/OneDrive/Desktop/Final Project/Wireless Vision-Aid for the Blind (WVAB)/cpp/build/CMakeFiles/navigation_demo.dir
+C:/Users/Shagor/OneDrive/Desktop/Final Project/Wireless Vision-Aid for the Blind (WVAB)/cpp/build/CMakeFiles/wvab_speaker.dir
+C:/Users/Shagor/OneDrive/Desktop/Final Project/Wireless Vision-Aid for the Blind (WVAB)/cpp/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/Shagor/OneDrive/Desktop/Final Project/Wireless Vision-Aid for the Blind (WVAB)/cpp/build/CMakeFiles/ZERO_CHECK.dir

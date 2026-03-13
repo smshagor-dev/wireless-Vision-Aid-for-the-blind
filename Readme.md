@@ -75,7 +75,7 @@ $env:WVAB_OFFLINE = "0"
 
 ### Voice Language (Real Device)
 - Spoken language requires installed TTS voice packs on the device.
-- If selected voice is unavailable, system falls back to English speech.
+- If selected voice is unavailable, system attempts default voice.
 
 Install voice packs (Run as Administrator):
 ```powershell
@@ -85,7 +85,31 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 Install any language:
 ```powershell
+.\install_tts_voice_packs.ps1 -Languages "bn,hi,ar" -CopyToSettings
 .\install_tts_voice_packs.ps1 -Languages hi-IN,bn-BD,fr-FR -CopyToSettings
+```
+
+Expose OneCore voices to SAPI (Run as Administrator):
+```powershell
+.\enable_onecore_voices.ps1
+```
+
+### Font Support for BN/HI/AR Overlay
+If camera overlay shows `[][][][]`, install fonts or use bundled Noto fonts in `assets/fonts`:
+- `assets/fonts/NotoSansBengali-Regular.ttf`
+- `assets/fonts/NotoSansDevanagari-Regular.ttf`
+- `assets/fonts/NotoNaskhArabic-Regular.ttf`
+
+You can also force a font:
+```powershell
+$env:WVAB_FONT_PATH="C:\Path\To\YourFont.ttf"
+```
+
+### Depth Model (MiDaS)
+If depth shows "Unavailable", ensure MiDaS weights exist:
+```powershell
+$env:WVAB_MIDAS_WEIGHTS="data\models\midas_v21_small_256.pt"
+python training\depth_diag.py
 ```
 
 ## Optional: Build C++ Speaker (Windows)
@@ -197,6 +221,8 @@ WebSocket control (default port 8765):
 - RU text shows but RU speech not correct: install RU speech pack on device.
 - `cmake not recognized`: install CMake and add to PATH.
 - Unicode text in frame not rendering: use latest GUI/server code (Unicode overlay support added).
+- BN/HI/AR speech not available: run `install_tts_voice_packs.ps1` as Administrator, then `enable_onecore_voices.ps1`, and reboot.
+- Depth unavailable: set `WVAB_MIDAS_WEIGHTS` and run `training\depth_diag.py`.
 
 ## Notes for Deployment
 - For blind-user safety, prioritize audio reliability:
