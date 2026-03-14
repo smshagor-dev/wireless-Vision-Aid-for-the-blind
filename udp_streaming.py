@@ -382,6 +382,7 @@ class UDPVisionServer:
             self.tts_engine = pyttsx3.init()
             self.tts_engine.setProperty('rate', self.tts_rate)
             self.speech_language = self._resolve_speech_language(self.language)
+            self._select_tts_voice(os.environ.get("WVAB_UDP_TTS_VOICE", ""))
             if self.speech_language != self.language:
                 self.logger.warning(
                     "TTS fallback: requested %s, using %s. Install voice pack to enable native speech.",
@@ -499,6 +500,26 @@ class UDPVisionServer:
         if requested_language in installed:
             return requested_language
         return "en"
+
+    def _select_tts_voice(self, preferred):
+        if not preferred or not self.tts_engine:
+            return
+        try:
+            voices = self.tts_engine.getProperty("voices")
+        except Exception:
+            return
+        preferred = preferred.strip().lower()
+        for voice in voices:
+            name = str(getattr(voice, "name", "")).lower()
+            vid = str(getattr(voice, "id", "")).lower()
+            if preferred in name or preferred in vid:
+                try:
+                    self.tts_engine.setProperty("voice", voice.id)
+                    self.logger.info("TTS voice set: %s", getattr(voice, "name", voice.id))
+                    return
+                except Exception:
+                    return
+        self.logger.warning("TTS voice '%s' not found. Using default.", preferred)
 
     def _translate_class_name_for(self, class_name, lang):
         entry = self.multilingual_labels.get(class_name)

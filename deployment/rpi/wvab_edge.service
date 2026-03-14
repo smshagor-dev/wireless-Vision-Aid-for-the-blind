@@ -1,0 +1,15 @@
+[Unit]
+Description=WVAB Raspberry Pi Edge Server
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/WVAB
+EnvironmentFile=/home/pi/WVAB/deployment/rpi/wvab_edge.env
+ExecStart=/home/pi/WVAB/deployment/rpi/wvab_edge_start.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -17,6 +17,7 @@ It detects objects from camera input and provides spoken guidance with position 
 - Multilingual labels from JSON
 - Runtime language selection
 - Smartphone camera support (IP stream)
+- Raspberry Pi edge mode (ESP32-CAM -> Pi -> audio)
 - Model training, validation, and export utilities
 - Optional Windows C++ speech backend (`wvab_speaker.exe`)
 
@@ -28,6 +29,10 @@ It detects objects from camera input and provides spoken guidance with position 
 - `train_navigation_model.py`: Train/val/export for YOLO models
 - `multilingual_labels.common.json`: Main multilingual labels + phrase map
 - `multilingual_labels.sample.json`: Sample mapping file
+- `deployment/rpi/wvab_edge.env`: Raspberry Pi edge environment defaults
+- `deployment/rpi/wvab_edge_start.sh`: Raspberry Pi edge start script
+- `deployment/rpi/wvab_edge.service`: Raspberry Pi systemd service
+- `tools/update_goal.py`: Update navigation goal file for dynamic planning
 - `install_tts_voice_packs.ps1`: Windows language/speech pack installer
 - `cpp/speaker_cli.cpp`: Windows SAPI speech CLI (for optional C++ speech path)
 
@@ -178,6 +183,33 @@ python smartphone_camera.py
 ```
 
 Use manual IP mode for faster setup.
+
+## Raspberry Pi Edge (ESP32-CAM -> Pi -> Audio)
+Use your Raspberry Pi 4 as the "central brain" and keep the ESP32-CAM on glasses.
+The Pi receives the low-latency stream and plays audio over Bluetooth or wired earphones.
+
+1. Install dependencies on Raspberry Pi:
+```bash
+sudo apt update
+sudo apt install -y python3-pip python3-venv espeak-ng libatlas-base-dev
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+2. Configure Pi edge env:
+```bash
+nano deployment/rpi/wvab_edge.env
+```
+
+3. Start the UDP vision server:
+```bash
+bash deployment/rpi/wvab_edge_start.sh
+```
+
+4. On ESP32-CAM, set `UDP_HOST` to the Pi IP and flash `esp32_cam_stream.ino`.
+
+See `production.md` for the full end-to-end Raspberry Pi flow (hardware, software mapping, voice).
 
 ## Secure UDP + WebSocket Control
 Encrypted UDP is supported for low-latency video with privacy protection.

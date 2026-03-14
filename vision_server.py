@@ -94,6 +94,7 @@ class VisionAidServer:
         self.tts_engine = pyttsx3.init()
         self.tts_engine.setProperty("rate", self.tts_rate)
         self.tts_engine.setProperty("volume", 1.0)
+        self._select_tts_voice(os.environ.get("WVAB_TTS_VOICE", ""))
         self.cpp_speaker_path = self._find_cpp_speaker()
         self.speech_queue = queue.Queue(maxsize=1)
         self.speech_lock = threading.Lock()
@@ -293,6 +294,26 @@ class VisionAidServer:
             return requested_language
         print(f"Warning: TTS voice for '{requested_language}' not found. Falling back to 'en'.")
         return "en"
+
+    def _select_tts_voice(self, preferred):
+        if not preferred or not self.tts_engine:
+            return
+        try:
+            voices = self.tts_engine.getProperty("voices")
+        except Exception:
+            return
+        preferred = preferred.strip().lower()
+        for voice in voices:
+            name = str(getattr(voice, "name", "")).lower()
+            vid = str(getattr(voice, "id", "")).lower()
+            if preferred in name or preferred in vid:
+                try:
+                    self.tts_engine.setProperty("voice", voice.id)
+                    self.logger.info("TTS voice set: %s", getattr(voice, "name", voice.id))
+                    return
+                except Exception:
+                    return
+        self.logger.warning("TTS voice '%s' not found. Using default.", preferred)
 
     def _load_multilingual_labels(self, path):
         if not path or not os.path.exists(path):

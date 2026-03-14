@@ -64,3 +64,7 @@
 2026-03-13 22:27:28,204 | INFO | wvab_gui | Overlay font loaded: C:\Users\Shagor\OneDrive\Desktop\Final Project\Wireless Vision-Aid for the Blind (WVAB)\assets\fonts\NotoSansBengali-Regular.ttf
 2026-03-13 22:27:33,153 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
 2026-03-13 22:27:39,875 | INFO | wvab_gui | Overlay font loaded: C:\Users\Shagor\OneDrive\Desktop\Final Project\Wireless Vision-Aid for the Blind (WVAB)\assets\fonts\NotoNaskhArabic-Regular.ttf
+2026-03-14 06:15:53,918 | INFO | wvab_gui | Overlay font loaded: C:\Users\Shagor\OneDrive\Desktop\Final Project\Wireless Vision-Aid for the Blind (WVAB)\assets\fonts\NotoNaskhArabic-Regular.ttf
+2026-03-14 06:15:54,908 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
+2026-03-14 12:06:34,201 | INFO | wvab_gui | Overlay font loaded: C:/Windows/Fonts/arial.ttf
+2026-03-14 12:06:35,051 | INFO | wvab_gui | Depth model loaded: MiDaS_small on cpu
