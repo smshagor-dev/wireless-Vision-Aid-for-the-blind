@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../localization/app_strings.dart';
 import '../models/app_settings.dart';
 import '../services/edge_connection_service.dart';
 import '../services/feedback_service.dart';
@@ -19,6 +20,7 @@ class AppController extends ChangeNotifier {
   AppSettings _settings = const AppSettings();
 
   AppSettings get settings => _settings;
+  AppStrings get strings => AppStrings(_settings.languageCode);
   EdgeEndpoint? get edgeEndpoint => edgeConnectionService.endpoint;
   EdgeConfigurationState get edgeState => edgeConnectionService.state;
 
@@ -38,6 +40,11 @@ class AppController extends ChangeNotifier {
     _settings = settings;
     await speechService.setLanguage(settings.languageCode);
     notifyListeners();
+  }
+
+  Future<void> setLanguage(String languageCode) async {
+    if (!AppStrings.supportedLanguages.containsKey(languageCode)) return;
+    await updateSettings(_settings.copyWith(languageCode: languageCode));
   }
 
   Future<void> announce(String message, {bool urgent = false}) async {
