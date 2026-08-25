@@ -1,16 +1,20 @@
+#!/usr/bin/env python3
+"""Authenticated, encrypted, replay-aware low-latency WVAB UDP transport."""
+
+from __future__ import annotations
+
 import argparse
 import asyncio
 import base64
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import queue
 import signal
 import socket
-import struct
 import threading
 import time
-from logging.handlers import RotatingFileHandler
 
 import cv2
 import numpy as np
@@ -20,6 +24,21 @@ from PIL import Image, ImageDraw, ImageFont
 from core.font_paths import overlay_font_candidates
 from core.proximity import classify_bbox_proximity
 from core.security import normalize_control_host, resolve_control_token, verify_secret
+from core.udp_protocol import (
+    AUTH_FRAME_ID,
+    HEADER_SIZE,
+    MAX_DATA_FRAME_ID,
+    MAX_FRAME_BYTES,
+    MAX_FRAME_CHUNKS,
+    MAX_INFLIGHT_FRAMES_PER_CLIENT,
+    MAX_UDP_PAYLOAD,
+    NONCE_SIZE,
+    TAG_SIZE,
+    frame_id_is_newer,
+    pack_header,
+    unpack_header,
+    valid_frame_shape,
+)
 from offline_utils import configure_offline_env, ensure_local_model
 
 OFFLINE_MODE = configure_offline_env()
@@ -33,14 +52,7 @@ except Exception:
     get_random_bytes = None
 
 
-MAX_UDP_PAYLOAD = 1450
-HEADER_FORMAT = "!IHHH"
-HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
-FRAME_BUFFER_TIMEOUT = 2.0
-NONCE_SIZE = 12
-TAG_SIZE = 16
-STREAM_TIMEOUT_SEC = 5.0
-RECV_IDLE_RESET_SEC = 10.0
+FRAME_BUFFER_TIMEOUT_S = 2.0
 HEALTH_INTERVAL_DEFAULT_S = 5.0
 WATCHDOG_CHECK_DEFAULT_S = 2.0
 WATCHDOG_SERVER_IDLE_DEFAULT_S = 30.0
@@ -48,11 +60,10 @@ WATCHDOG_CLIENT_IDLE_DEFAULT_S = 15.0
 TRACK_IOU_DEFAULT = 0.3
 TRACK_MAX_AGE_S_DEFAULT = 1.0
 TRACK_MIN_HITS_DEFAULT = 1
-AUTH_FRAME_ID = 0xFFFFFFFF
 
 
 def _bool_env(name, default="0"):
-    return os.environ.get(name, default).strip() == "1"
+    return str(os.environ.get(name, default)).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _validate_aes_key(key_bytes):
@@ -77,6 +88,32 @@ def _load_udp_key():
         except Exception:
             return None
     return None
+
+
+def _derive_nonce(base_nonce, chunk_index):
+    if base_nonce is None or len(base_nonce) != NONCE_SIZE:
+        return None
+    nonce = bytearray(base_nonce)
+    counter = int.from_bytes(nonce[8:12], "big")
+    nonce[8:12] = ((counter + int(chunk_index)) & 0xFFFFFFFF).to_bytes(4, "big")
+    return bytes(nonce)
+
+
+def _require_secure_transport():
+    encrypt = _bool_env("WVAB_UDP_ENCRYPT", "1")
+    allow_insecure = _bool_env("WVAB_ALLOW_INSECURE_UDP", "0")
+    if not encrypt and not allow_insecure:
+        raise RuntimeError(
+            "unencrypted UDP is disabled by default; set WVAB_ALLOW_INSECURE_UDP=1 only for isolated development"
+        )
+    key = _validate_aes_key(_load_udp_key()) if encrypt else None
+    if encrypt and (AES is None or get_random_bytes is None or key is None):
+        raise RuntimeError("UDP encryption is enabled but PyCryptodome or a valid AES key is unavailable")
+    require_auth = _bool_env("WVAB_UDP_AUTH", "1")
+    token = os.environ.get("WVAB_UDP_TOKEN", "").strip()
+    if require_auth and len(token) < 16:
+        raise RuntimeError("WVAB_UDP_TOKEN must contain at least 16 characters when authentication is enabled")
+    return encrypt, key, require_auth, token
 
 
 def _setup_logger(log_path=None, level=None):
@@ -120,7 +157,7 @@ def _draw_unicode_text(frame, text, x, y, color_bgr, font):
     text = str(text or "object").strip() or "object"
     x = int(max(x, 2))
     y = int(max(y, 12))
-    bg_w = min(frame.shape[1] - x - 2, max(60, len(text) * 10))
+    bg_w = min(max(frame.shape[1] - x - 2, 1), max(60, len(text) * 10))
     cv2.rectangle(frame, (x - 2, y - 14), (x + bg_w, y + 4), (0, 0, 0), -1)
     if font is None:
         safe = text if text.isascii() else "object"
@@ -143,30 +180,6 @@ def _write_health(path, payload, logger):
         os.replace(tmp_path, path)
     except Exception as exc:
         logger.debug("Health write failed: %s", exc)
-
-
-def _iou(box_a, box_b):
-    ax1, ay1, ax2, ay2 = box_a
-    bx1, by1, bx2, by2 = box_b
-    inter_x1, inter_y1 = max(ax1, bx1), max(ay1, by1)
-    inter_x2, inter_y2 = min(ax2, bx2), min(ay2, by2)
-    inter_w, inter_h = max(0.0, inter_x2 - inter_x1), max(0.0, inter_y2 - inter_y1)
-    inter = inter_w * inter_h
-    if inter <= 0:
-        return 0.0
-    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
-    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
-    union = area_a + area_b - inter
-    return inter / union if union > 0 else 0.0
-
-
-def _derive_nonce(base_nonce, chunk_index):
-    if base_nonce is None or len(base_nonce) != NONCE_SIZE:
-        return None
-    nonce = bytearray(base_nonce)
-    counter = int.from_bytes(nonce[8:12], "big")
-    nonce[8:12] = ((counter + int(chunk_index)) & 0xFFFFFFFF).to_bytes(4, "big")
-    return bytes(nonce)
 
 
 def _load_config(path):
@@ -197,16 +210,31 @@ def _apply_config_args(args, defaults, config, mode):
     return args
 
 
+def _iou(box_a, box_b):
+    ax1, ay1, ax2, ay2 = box_a
+    bx1, by1, bx2, by2 = box_b
+    inter_x1, inter_y1 = max(ax1, bx1), max(ay1, by1)
+    inter_x2, inter_y2 = min(ax2, bx2), min(ay2, by2)
+    inter_w, inter_h = max(0.0, inter_x2 - inter_x1), max(0.0, inter_y2 - inter_y1)
+    inter = inter_w * inter_h
+    if inter <= 0:
+        return 0.0
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
 class SimpleTracker:
     def __init__(self, iou_threshold=TRACK_IOU_DEFAULT, max_age_s=TRACK_MAX_AGE_S_DEFAULT, min_hits=TRACK_MIN_HITS_DEFAULT):
         self.iou_threshold = float(iou_threshold)
-        self.max_age_s = float(max_age_s)
-        self.min_hits = int(min_hits)
+        self.max_age_s = max(float(max_age_s), 0.05)
+        self.min_hits = max(int(min_hits), 1)
         self.next_id = 1
         self.tracks = {}
 
     def update(self, detections):
-        now = time.time()
+        now = time.monotonic()
         updated = {}
         used = set()
         for track_id, track in list(self.tracks.items()):
@@ -246,10 +274,26 @@ class SimpleTracker:
 
 
 class UDPVisionServer:
-    def __init__(self, host="0.0.0.0", port=9999, model_path="yolov8n.pt", language="en", labels_path="multilingual_labels.common.json", headless=False):
+    def __init__(
+        self,
+        host="0.0.0.0",
+        port=9999,
+        model_path="yolov8n.pt",
+        language="en",
+        labels_path="multilingual_labels.common.json",
+        headless=False,
+    ):
         self.host = host
         self.port = int(port)
+        if not 1 <= self.port <= 65535:
+            raise ValueError("UDP port must be in 1..65535")
         self.logger = _setup_logger()
+        self.encrypt_udp, self.udp_key, self.require_auth, self.auth_token = _require_secure_transport()
+        self.auth_ttl_s = max(float(os.environ.get("WVAB_UDP_AUTH_TTL_S", "120")), 5.0)
+        self.auth_ok = {}
+        self.seen_auth_nonces = {}
+        self.last_completed_frame = {}
+
         self.model = YOLO(ensure_local_model(model_path, offline=OFFLINE_MODE))
         self.language = (language or "en").strip().lower()
         self.labels_path = labels_path
@@ -258,32 +302,28 @@ class UDPVisionServer:
         if self.language not in self.available_languages:
             self.language = "en"
         self.overlay_font = _load_overlay_font(self.language, self.logger)
-        self.headless = headless or _bool_env("WVAB_UDP_HEADLESS", "0")
-
-        self.encrypt_udp = _bool_env("WVAB_UDP_ENCRYPT", "1")
-        self.udp_key = _validate_aes_key(_load_udp_key()) if self.encrypt_udp else None
-        if self.encrypt_udp and (AES is None or self.udp_key is None):
-            raise RuntimeError("UDP encryption enabled but Crypto/key is unavailable or invalid")
-        self.require_auth = _bool_env("WVAB_UDP_AUTH", "1")
-        self.auth_token = os.environ.get("WVAB_UDP_TOKEN", "").strip()
-        if self.require_auth and not self.auth_token:
-            raise RuntimeError("UDP auth enabled but WVAB_UDP_TOKEN is not set")
-        self.auth_ttl_s = float(os.environ.get("WVAB_UDP_AUTH_TTL_S", "120"))
-        self.auth_ok = {}
+        self.headless = bool(headless or _bool_env("WVAB_UDP_HEADLESS", "0"))
 
         self.enable_tracking = _bool_env("WVAB_UDP_TRACKING", "1")
-        self.tracker = SimpleTracker(
-            os.environ.get("WVAB_UDP_TRACK_IOU", TRACK_IOU_DEFAULT),
-            os.environ.get("WVAB_UDP_TRACK_MAX_AGE_S", TRACK_MAX_AGE_S_DEFAULT),
-            os.environ.get("WVAB_UDP_TRACK_MIN_HITS", TRACK_MIN_HITS_DEFAULT),
-        ) if self.enable_tracking else None
+        self.tracker = (
+            SimpleTracker(
+                os.environ.get("WVAB_UDP_TRACK_IOU", TRACK_IOU_DEFAULT),
+                os.environ.get("WVAB_UDP_TRACK_MAX_AGE_S", TRACK_MAX_AGE_S_DEFAULT),
+                os.environ.get("WVAB_UDP_TRACK_MIN_HITS", TRACK_MIN_HITS_DEFAULT),
+            )
+            if self.enable_tracking
+            else None
+        )
 
         self.health_path = os.environ.get("WVAB_UDP_HEALTH_PATH", "").strip() or None
-        self.health_interval_s = float(os.environ.get("WVAB_UDP_HEALTH_INTERVAL_S", HEALTH_INTERVAL_DEFAULT_S))
-        self.watchdog_server_idle_s = float(os.environ.get("WVAB_UDP_WATCHDOG_SERVER_IDLE_S", WATCHDOG_SERVER_IDLE_DEFAULT_S))
-        self.server_idle_restart_s = float(os.environ.get("WVAB_UDP_SERVER_IDLE_RESTART_S", "0"))
+        self.health_interval_s = max(float(os.environ.get("WVAB_UDP_HEALTH_INTERVAL_S", HEALTH_INTERVAL_DEFAULT_S)), 0.5)
+        self.watchdog_server_idle_s = float(
+            os.environ.get("WVAB_UDP_WATCHDOG_SERVER_IDLE_S", WATCHDOG_SERVER_IDLE_DEFAULT_S)
+        )
 
         self.confidence_threshold = float(os.environ.get("WVAB_UDP_CONFIDENCE", "0.5"))
+        if not 0.05 <= self.confidence_threshold <= 0.99:
+            raise ValueError("WVAB_UDP_CONFIDENCE must be between 0.05 and 0.99")
         self.all_objects = _bool_env("WVAB_UDP_ALL_OBJECTS", "0")
         self.critical_objects = {
             "person": 1,
@@ -299,42 +339,50 @@ class UDPVisionServer:
             "potted plant": 4,
         }
         self.last_announcement = {}
-        self.announcement_cooldown = float(os.environ.get("WVAB_UDP_ANNOUNCE_COOLDOWN_S", "2.5"))
+        self.announcement_cooldown = max(float(os.environ.get("WVAB_UDP_ANNOUNCE_COOLDOWN_S", "2.5")), 0.1)
 
         self.enable_tts = _bool_env("WVAB_UDP_TTS", "1")
         self.tts_engine = None
         self.speech_queue = queue.Queue(maxsize=1)
         self.tts_stop_event = threading.Event()
+        self.tts_thread = None
         self.speech_language = self.language
         if self.enable_tts:
-            self.tts_engine = pyttsx3.init()
-            self.tts_engine.setProperty("rate", int(os.environ.get("WVAB_UDP_TTS_RATE", "170")))
-            self.speech_language = self._resolve_speech_language(self.language)
-            self.tts_thread = threading.Thread(target=self._tts_worker, daemon=True)
-            self.tts_thread.start()
+            try:
+                self.tts_engine = pyttsx3.init()
+                self.tts_engine.setProperty("rate", int(os.environ.get("WVAB_UDP_TTS_RATE", "170")))
+                self.speech_language = self._resolve_speech_language(self.language)
+                self.tts_thread = threading.Thread(target=self._tts_worker, daemon=True)
+                self.tts_thread.start()
+            except Exception as exc:
+                self.logger.warning("TTS unavailable: %s", exc)
+                self.enable_tts = False
+                self.tts_engine = None
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
         self.frame_count = 0
         self.fps = 0.0
         self.latency = 0.0
-        self.last_packet_time = time.time()
-        self.last_frame_time = time.time()
+        self.last_packet_mono = time.monotonic()
+        self.last_frame_mono = time.monotonic()
 
         self.control_enabled = _bool_env("WVAB_WS_CONTROL", "1")
         self.control_host = normalize_control_host(os.environ.get("WVAB_WS_CONTROL_HOST"))
         self.control_port = int(os.environ.get("WVAB_WS_CONTROL_PORT", "8765"))
         self.control_token = resolve_control_token(os.environ.get("WVAB_WS_TOKEN"), self.auth_token)
-        if self.control_enabled and not self.control_token:
-            raise RuntimeError("WebSocket control enabled but no WVAB_WS_TOKEN or WVAB_UDP_TOKEN is configured")
+        if self.control_enabled and len(self.control_token or "") < 16:
+            raise RuntimeError("WebSocket control requires a secret of at least 16 characters")
         self._control_stop = threading.Event()
+        self._control_thread = None
 
     def _load_multilingual_labels(self, path):
         if not path or not os.path.exists(path):
             return {}
         try:
             with open(path, "r", encoding="utf-8") as handle:
-                return json.load(handle)
+                data = json.load(handle)
+            return data if isinstance(data, dict) else {}
         except Exception as exc:
             self.logger.warning("Label map load failed: %s", exc)
             return {}
@@ -349,11 +397,11 @@ class UDPVisionServer:
         return sorted(languages)
 
     def _translate(self, class_name, lang=None):
-        lang = lang or self.language
         entry = self.multilingual_labels.get(class_name)
+        lang = lang or self.language
         if isinstance(entry, dict):
             return entry.get(lang, entry.get("en", class_name))
-        return class_name
+        return class_name.replace("_", " ")
 
     def _phrase(self, key, lang=None):
         lang = lang or self.language
@@ -375,8 +423,10 @@ class UDPVisionServer:
         for voice in voices:
             for code in getattr(voice, "languages", []) or []:
                 raw = code.decode("utf-8", "ignore") if isinstance(code, bytes) else str(code)
-                if len(raw) >= 2:
-                    languages.add(raw[-5:-3].lower() if "-" in raw[-5:] else raw[:2].lower())
+                raw = raw.lower()
+                for marker in ("bn", "hi", "ru", "en", "ar", "es", "fr"):
+                    if marker in raw:
+                        languages.add(marker)
         return languages
 
     def _resolve_speech_language(self, requested):
@@ -389,7 +439,7 @@ class UDPVisionServer:
                 text, created = self.speech_queue.get(timeout=0.2)
             except queue.Empty:
                 continue
-            if stale_s > 0 and time.time() - created > stale_s:
+            if stale_s > 0 and time.monotonic() - created > stale_s:
                 continue
             try:
                 self.tts_engine.say(text)
@@ -400,51 +450,65 @@ class UDPVisionServer:
     def speak(self, text):
         if not self.enable_tts:
             return
+        payload = (text, time.monotonic())
         try:
-            self.speech_queue.put_nowait((text, time.time()))
+            self.speech_queue.put_nowait(payload)
         except queue.Full:
             try:
                 self.speech_queue.get_nowait()
-                self.speech_queue.put_nowait((text, time.time()))
+                self.speech_queue.put_nowait(payload)
             except Exception:
                 pass
 
     def stop_tts(self):
         self.tts_stop_event.set()
-        thread = getattr(self, "tts_thread", None)
-        if thread and thread.is_alive():
-            thread.join(timeout=1.0)
+        if self.tts_thread and self.tts_thread.is_alive():
+            self.tts_thread.join(timeout=1.0)
+        if self.tts_engine is not None:
+            try:
+                self.tts_engine.stop()
+            except Exception:
+                pass
 
     def _is_authed(self, addr):
         if not self.require_auth:
             return True
-        timestamp = self.auth_ok.get(addr)
-        if timestamp is None:
+        authenticated = self.auth_ok.get(addr)
+        if authenticated is None:
             return False
-        if time.time() - timestamp > self.auth_ttl_s:
+        if time.monotonic() - authenticated > self.auth_ttl_s:
             self.auth_ok.pop(addr, None)
             return False
         return True
 
-    def _handle_auth_packet(self, payload, addr):
+    def _handle_auth_packet(self, header, payload, addr):
         if not self.require_auth:
+            self.last_packet_mono = time.monotonic()
             return True
         try:
             if self.encrypt_udp:
                 if len(payload) <= NONCE_SIZE + TAG_SIZE:
                     return False
                 base_nonce = payload[:NONCE_SIZE]
+                if base_nonce in self.seen_auth_nonces:
+                    return False
                 tag = payload[NONCE_SIZE:NONCE_SIZE + TAG_SIZE]
                 ciphertext = payload[NONCE_SIZE + TAG_SIZE:]
                 cipher = AES.new(self.udp_key, AES.MODE_GCM, nonce=_derive_nonce(base_nonce, 0))
-                token = cipher.decrypt_and_verify(ciphertext, tag).decode("utf-8", "ignore").strip()
+                cipher.update(header)
+                token = cipher.decrypt_and_verify(ciphertext, tag).decode("utf-8", "strict").strip()
             else:
-                token = payload.decode("utf-8", "ignore").strip()
+                base_nonce = None
+                token = payload.decode("utf-8", "strict").strip()
         except Exception:
             return False
         if not verify_secret(token, self.auth_token):
             return False
-        self.auth_ok[addr] = time.time()
+        now = time.monotonic()
+        self.auth_ok[addr] = now
+        if base_nonce is not None:
+            self.seen_auth_nonces[base_nonce] = now
+        self.last_packet_mono = now
         return True
 
     def calculate_position(self, bbox, frame_shape):
@@ -454,7 +518,7 @@ class UDPVisionServer:
         return direction, classify_bbox_proximity(bbox, frame_shape)
 
     def should_announce(self, key):
-        now = time.time()
+        now = time.monotonic()
         last = self.last_announcement.get(key)
         if last is None or now - last > self.announcement_cooldown:
             self.last_announcement[key] = now
@@ -503,7 +567,7 @@ class UDPVisionServer:
             try:
                 response = self.apply_control(json.loads(message))
             except Exception as exc:
-                response = {"ok": False, "error": str(exc)}
+                response = {"ok": False, "error": type(exc).__name__}
             await websocket.send(json.dumps(response, ensure_ascii=False))
 
     def _control_thread_main(self):
@@ -513,7 +577,9 @@ class UDPVisionServer:
             except Exception as exc:
                 self.logger.error("WebSocket control unavailable: %s", exc)
                 return
-            async with websockets.serve(self._control_handler, self.control_host, self.control_port):
+            if self.control_host not in {"127.0.0.1", "::1", "localhost"}:
+                self.logger.warning("WebSocket control is bound remotely; use only behind a trusted/TLS boundary")
+            async with websockets.serve(self._control_handler, self.control_host, self.control_port, max_size=8192):
                 self.logger.info("WebSocket control listening on %s:%s", self.control_host, self.control_port)
                 while not self._control_stop.is_set():
                     await asyncio.sleep(0.25)
@@ -525,10 +591,11 @@ class UDPVisionServer:
 
     def start_control_server(self):
         if self.control_enabled:
-            threading.Thread(target=self._control_thread_main, daemon=True).start()
+            self._control_thread = threading.Thread(target=self._control_thread_main, daemon=True)
+            self._control_thread.start()
 
     def process_frame(self, frame):
-        started = time.time()
+        started = time.monotonic()
         results = self.model(frame, verbose=False)
         detections = []
         for result in results:
@@ -542,10 +609,11 @@ class UDPVisionServer:
                     continue
                 detections.append({"class_name": class_name, "bbox": box.xyxy[0].cpu().numpy()})
 
-        tracks = self.tracker.update(detections) if self.tracker else [
-            {"id": None, "class_name": item["class_name"], "bbox": item["bbox"], "hits": 1}
-            for item in detections
-        ]
+        tracks = (
+            self.tracker.update(detections)
+            if self.tracker
+            else [{"id": None, "class_name": item["class_name"], "bbox": item["bbox"], "hits": 1} for item in detections]
+        )
         announcements = []
         for track in tracks:
             class_name = track["class_name"]
@@ -576,18 +644,33 @@ class UDPVisionServer:
         if announcements:
             announcements.sort(key=lambda item: item[0])
             self.speak(announcements[0][1])
-        self.latency = (time.time() - started) * 1000.0
+        self.latency = (time.monotonic() - started) * 1000.0
         return frame
+
+    def _evict_excess_frames(self, frame_buffers, addr):
+        keys = [key for key in frame_buffers if key[0] == addr]
+        if len(keys) < MAX_INFLIGHT_FRAMES_PER_CLIENT:
+            return
+        oldest = min(keys, key=lambda key: frame_buffers[key]["created"])
+        frame_buffers.pop(oldest, None)
+
+    def _cleanup_state(self, frame_buffers):
+        now = time.monotonic()
+        for key in [key for key, value in frame_buffers.items() if now - value["created"] > FRAME_BUFFER_TIMEOUT_S]:
+            frame_buffers.pop(key, None)
+        for addr in [addr for addr, stamp in self.auth_ok.items() if now - stamp > self.auth_ttl_s]:
+            self.auth_ok.pop(addr, None)
+        for nonce in [nonce for nonce, stamp in self.seen_auth_nonces.items() if now - stamp > self.auth_ttl_s]:
+            self.seen_auth_nonces.pop(nonce, None)
 
     def receive_frames(self):
         self.sock.bind((self.host, self.port))
         self.sock.settimeout(0.5)
         self.start_control_server()
-        self.logger.info("UDP vision server listening on %s:%s", self.host, self.port)
+        self.logger.info("Secure UDP vision server listening on %s:%s", self.host, self.port)
         frame_buffers = {}
         frame_times = []
-        last_cleanup = time.time()
-        last_reset = 0.0
+        last_cleanup = time.monotonic()
         stop_event = threading.Event()
 
         def handle_signal(signum, _frame):
@@ -602,6 +685,7 @@ class UDPVisionServer:
 
         def health_loop():
             while not stop_event.is_set():
+                now = time.monotonic()
                 _write_health(
                     self.health_path,
                     {
@@ -610,8 +694,8 @@ class UDPVisionServer:
                         "fps": self.fps,
                         "latency_ms": round(self.latency, 2),
                         "frames_total": self.frame_count,
-                        "last_packet_s": round(time.time() - self.last_packet_time, 2),
-                        "last_frame_s": round(time.time() - self.last_frame_time, 2),
+                        "last_valid_packet_s": round(now - self.last_packet_mono, 2),
+                        "last_frame_s": round(now - self.last_frame_mono, 2),
                     },
                     self.logger,
                 )
@@ -628,56 +712,96 @@ class UDPVisionServer:
                     packet, addr = None, None
 
                 if packet is not None:
-                    self.last_packet_time = time.time()
-                    if len(packet) < HEADER_SIZE:
+                    if len(packet) < HEADER_SIZE or len(packet) > MAX_UDP_PAYLOAD:
                         continue
-                    frame_id, total_chunks, chunk_index, payload_size = struct.unpack(HEADER_FORMAT, packet[:HEADER_SIZE])
+                    header = packet[:HEADER_SIZE]
+                    try:
+                        frame_id, total_chunks, chunk_index, payload_size = unpack_header(header)
+                    except ValueError:
+                        continue
                     payload = packet[HEADER_SIZE:]
+
                     if frame_id == AUTH_FRAME_ID and total_chunks == 0 and chunk_index == 0:
-                        if payload_size == len(payload):
-                            self._handle_auth_packet(payload, addr)
-                        continue
-                    if total_chunks <= 0 or chunk_index >= total_chunks or payload_size != len(payload) or not self._is_authed(addr):
+                        if payload_size == len(payload) and payload_size > 0:
+                            self._handle_auth_packet(header, payload, addr)
                         continue
 
-                    entry = frame_buffers.setdefault(
-                        frame_id,
-                        {"total": total_chunks, "chunks": {}, "timestamp": time.time(), "nonce": None},
-                    )
-                    if entry["total"] != total_chunks:
-                        frame_buffers.pop(frame_id, None)
+                    if not valid_frame_shape(total_chunks, chunk_index, payload_size, len(packet)):
+                        continue
+                    if not self._is_authed(addr):
+                        continue
+                    if not frame_id_is_newer(frame_id, self.last_completed_frame.get(addr)):
+                        continue
+
+                    key = (addr, frame_id)
+                    entry = frame_buffers.get(key)
+                    if entry is None:
+                        self._evict_excess_frames(frame_buffers, addr)
+                        entry = {
+                            "total": total_chunks,
+                            "chunks": {},
+                            "created": time.monotonic(),
+                            "base_nonce": None,
+                            "bytes": 0,
+                        }
+                        frame_buffers[key] = entry
+                    elif entry["total"] != total_chunks:
+                        frame_buffers.pop(key, None)
                         continue
 
                     if self.encrypt_udp:
-                        if chunk_index == 0:
-                            if len(payload) <= NONCE_SIZE + TAG_SIZE:
-                                continue
-                            entry["nonce"] = payload[:NONCE_SIZE]
-                            tag = payload[NONCE_SIZE:NONCE_SIZE + TAG_SIZE]
-                            ciphertext = payload[NONCE_SIZE + TAG_SIZE:]
-                        else:
-                            if entry["nonce"] is None or len(payload) <= TAG_SIZE:
-                                continue
-                            tag, ciphertext = payload[:TAG_SIZE], payload[TAG_SIZE:]
+                        if len(payload) <= NONCE_SIZE + TAG_SIZE:
+                            frame_buffers.pop(key, None)
+                            continue
+                        base_nonce = payload[:NONCE_SIZE]
+                        tag = payload[NONCE_SIZE:NONCE_SIZE + TAG_SIZE]
+                        ciphertext = payload[NONCE_SIZE + TAG_SIZE:]
+                        if entry["base_nonce"] is None:
+                            entry["base_nonce"] = base_nonce
+                        elif not verify_secret(base64.b64encode(base_nonce).decode(), base64.b64encode(entry["base_nonce"]).decode()):
+                            frame_buffers.pop(key, None)
+                            continue
                         try:
-                            cipher = AES.new(self.udp_key, AES.MODE_GCM, nonce=_derive_nonce(entry["nonce"], chunk_index))
-                            entry["chunks"][chunk_index] = cipher.decrypt_and_verify(ciphertext, tag)
+                            cipher = AES.new(self.udp_key, AES.MODE_GCM, nonce=_derive_nonce(base_nonce, chunk_index))
+                            cipher.update(header)
+                            plain = cipher.decrypt_and_verify(ciphertext, tag)
                         except Exception:
-                            frame_buffers.pop(frame_id, None)
+                            frame_buffers.pop(key, None)
                             continue
                     else:
-                        entry["chunks"][chunk_index] = payload
+                        plain = payload
+
+                    existing = entry["chunks"].get(chunk_index)
+                    if existing is not None:
+                        if existing != plain:
+                            frame_buffers.pop(key, None)
+                        continue
+                    if entry["bytes"] + len(plain) > MAX_FRAME_BYTES:
+                        frame_buffers.pop(key, None)
+                        continue
+                    entry["chunks"][chunk_index] = plain
+                    entry["bytes"] += len(plain)
+                    self.last_packet_mono = time.monotonic()
 
                     if len(entry["chunks"]) == total_chunks:
-                        data = b"".join(entry["chunks"][index] for index in range(total_chunks))
-                        frame_buffers.pop(frame_id, None)
+                        try:
+                            data = b"".join(entry["chunks"][index] for index in range(total_chunks))
+                        except KeyError:
+                            frame_buffers.pop(key, None)
+                            continue
+                        frame_buffers.pop(key, None)
+                        self.last_completed_frame[addr] = frame_id
+                        for stale_key in list(frame_buffers):
+                            if stale_key[0] == addr and not frame_id_is_newer(stale_key[1], frame_id):
+                                frame_buffers.pop(stale_key, None)
+
                         frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
                         if frame is None:
                             continue
-                        self.last_frame_time = time.time()
+                        self.last_frame_mono = time.monotonic()
                         processed = self.process_frame(frame)
                         self.frame_count += 1
-                        now = time.time()
+                        now = time.monotonic()
                         frame_times.append(now)
                         frame_times = [stamp for stamp in frame_times if now - stamp < 1.0]
                         self.fps = float(len(frame_times))
@@ -692,32 +816,24 @@ class UDPVisionServer:
                             )
                             cv2.imshow("WVAB - UDP Server", processed)
                             if cv2.waitKey(1) & 0xFF == ord("q"):
-                                break
+                                stop_event.set()
 
-                now = time.time()
-                if now - last_cleanup > 1.0:
-                    cutoff = now - FRAME_BUFFER_TIMEOUT
-                    for frame_id in [key for key, value in frame_buffers.items() if value["timestamp"] < cutoff]:
-                        frame_buffers.pop(frame_id, None)
-                    for client in [key for key, timestamp in self.auth_ok.items() if now - timestamp > self.auth_ttl_s]:
-                        self.auth_ok.pop(client, None)
+                now = time.monotonic()
+                if now - last_cleanup >= 1.0:
+                    self._cleanup_state(frame_buffers)
                     last_cleanup = now
 
-                idle = now - self.last_packet_time
-                if idle > RECV_IDLE_RESET_SEC and now - last_reset > 1.0:
-                    frame_buffers.clear()
-                    last_reset = now
+                idle = now - self.last_packet_mono
                 if self.watchdog_server_idle_s > 0 and idle > self.watchdog_server_idle_s:
-                    self.logger.error("Watchdog: no packets for %.1fs", idle)
-                    break
-                if self.server_idle_restart_s > 0 and idle > self.server_idle_restart_s:
-                    self.logger.error("Server idle threshold reached")
-                    break
+                    raise RuntimeError(f"watchdog: no valid authenticated UDP packets for {idle:.1f}s")
         finally:
             stop_event.set()
             self._control_stop.set()
             self.stop_tts()
-            self.sock.close()
+            try:
+                self.sock.close()
+            except Exception:
+                pass
             if not self.headless:
                 cv2.destroyAllWindows()
             self.logger.info("UDP server stopped")
@@ -725,34 +841,38 @@ class UDPVisionServer:
 
 class UDPCameraClient:
     def __init__(self, server_ip="192.168.4.1", server_port=9999):
-        self.server_ip = server_ip
+        self.server_ip = str(server_ip)
         self.server_port = int(server_port)
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
-        self.encrypt_udp = _bool_env("WVAB_UDP_ENCRYPT", "1")
-        self.udp_key = _validate_aes_key(_load_udp_key()) if self.encrypt_udp else None
-        if self.encrypt_udp and (AES is None or self.udp_key is None):
-            raise RuntimeError("UDP encryption enabled but Crypto/key is unavailable or invalid")
-        self.require_auth = _bool_env("WVAB_UDP_AUTH", "1")
-        self.auth_token = os.environ.get("WVAB_UDP_TOKEN", "").strip()
-        if self.require_auth and not self.auth_token:
-            raise RuntimeError("UDP auth enabled but WVAB_UDP_TOKEN is not set")
-        self.auth_refresh_s = float(os.environ.get("WVAB_UDP_AUTH_REFRESH_S", "30"))
+        if not 1 <= self.server_port <= 65535:
+            raise ValueError("server port must be in 1..65535")
+        self.encrypt_udp, self.udp_key, self.require_auth, self.auth_token = _require_secure_transport()
+        self.auth_refresh_s = max(float(os.environ.get("WVAB_UDP_AUTH_REFRESH_S", "30")), 2.0)
         self.health_path = os.environ.get("WVAB_UDP_HEALTH_PATH", "").strip() or None
-        self.health_interval_s = float(os.environ.get("WVAB_UDP_HEALTH_INTERVAL_S", HEALTH_INTERVAL_DEFAULT_S))
-        self.watchdog_check_s = float(os.environ.get("WVAB_UDP_WATCHDOG_CHECK_S", WATCHDOG_CHECK_DEFAULT_S))
-        self.watchdog_client_idle_s = float(os.environ.get("WVAB_UDP_WATCHDOG_CLIENT_IDLE_S", WATCHDOG_CLIENT_IDLE_DEFAULT_S))
+        self.health_interval_s = max(float(os.environ.get("WVAB_UDP_HEALTH_INTERVAL_S", HEALTH_INTERVAL_DEFAULT_S)), 0.5)
+        self.watchdog_check_s = max(float(os.environ.get("WVAB_UDP_WATCHDOG_CHECK_S", WATCHDOG_CHECK_DEFAULT_S)), 0.2)
+        self.watchdog_client_idle_s = float(
+            os.environ.get("WVAB_UDP_WATCHDOG_CLIENT_IDLE_S", WATCHDOG_CLIENT_IDLE_DEFAULT_S)
+        )
         self.logger = _setup_logger()
-        self.last_send_ok = time.time()
-        self.last_frame_ok = time.time()
+        self.sock = self._new_socket()
+        self.last_send_mono = time.monotonic()
+        self.last_frame_mono = time.monotonic()
+        self.force_auth = True
+        self.watchdog_error = None
+
+    @staticmethod
+    def _new_socket():
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+        return sock
 
     def _recreate_socket(self):
         try:
             self.sock.close()
         except Exception:
             pass
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+        self.sock = self._new_socket()
+        self.force_auth = True
 
     def _send_packet(self, packet):
         try:
@@ -760,42 +880,64 @@ class UDPCameraClient:
         except OSError:
             self._recreate_socket()
             self.sock.sendto(packet, (self.server_ip, self.server_port))
-        self.last_send_ok = time.time()
+        self.last_send_mono = time.monotonic()
 
     def _send_auth(self):
         if not self.require_auth:
+            self.force_auth = False
             return
         token = self.auth_token.encode("utf-8")
         if self.encrypt_udp:
             base_nonce = get_random_bytes(NONCE_SIZE)
+            payload_size = NONCE_SIZE + TAG_SIZE + len(token)
+            header = pack_header(AUTH_FRAME_ID, 0, 0, payload_size)
             cipher = AES.new(self.udp_key, AES.MODE_GCM, nonce=_derive_nonce(base_nonce, 0))
+            cipher.update(header)
             ciphertext, tag = cipher.encrypt_and_digest(token)
             payload = base_nonce + tag + ciphertext
         else:
             payload = token
-        header = struct.pack(HEADER_FORMAT, AUTH_FRAME_ID, 0, 0, len(payload))
+            header = pack_header(AUTH_FRAME_ID, 0, 0, len(payload))
         self._send_packet(header + payload)
+        self.force_auth = False
+
+    @staticmethod
+    def _normalize_camera_source(source):
+        text = str(source).strip()
+        return int(text) if text.isdigit() else text
 
     def send_frames(self, camera_source=0):
+        camera_source = self._normalize_camera_source(camera_source)
         cap = cv2.VideoCapture(camera_source)
         if not cap.isOpened():
             raise RuntimeError(f"Could not open camera {camera_source}")
 
         frame_id = 0
         last_auth = 0.0
-        last_camera_ok = time.time()
+        last_camera_ok = time.monotonic()
         stop_event = threading.Event()
+
+        def handle_signal(signum, _frame):
+            self.logger.info("Signal %s received", signum)
+            stop_event.set()
+
+        signal.signal(signal.SIGINT, handle_signal)
+        try:
+            signal.signal(signal.SIGTERM, handle_signal)
+        except Exception:
+            pass
 
         def health_loop():
             while not stop_event.is_set():
+                now = time.monotonic()
                 _write_health(
                     self.health_path,
                     {
                         "role": "client",
                         "ts": time.time(),
                         "server": f"{self.server_ip}:{self.server_port}",
-                        "last_send_s": round(time.time() - self.last_send_ok, 2),
-                        "last_frame_s": round(time.time() - self.last_frame_ok, 2),
+                        "last_send_s": round(now - self.last_send_mono, 2),
+                        "last_frame_s": round(now - self.last_frame_mono, 2),
                     },
                     self.logger,
                 )
@@ -803,11 +945,11 @@ class UDPCameraClient:
 
         def watchdog_loop():
             while not stop_event.wait(self.watchdog_check_s):
-                idle = time.time() - self.last_send_ok
+                idle = time.monotonic() - self.last_send_mono
                 if self.watchdog_client_idle_s > 0 and idle > self.watchdog_client_idle_s:
-                    self.logger.error("Watchdog: no successful sends for %.1fs", idle)
+                    self.watchdog_error = f"watchdog: no successful UDP sends for {idle:.1f}s"
                     stop_event.set()
-                    break
+                    return
 
         if self.health_path:
             threading.Thread(target=health_loop, daemon=True).start()
@@ -817,47 +959,59 @@ class UDPCameraClient:
         try:
             while not stop_event.is_set():
                 ok, frame = cap.read()
-                if not ok:
-                    if time.time() - last_camera_ok > STREAM_TIMEOUT_SEC:
+                if not ok or frame is None:
+                    if time.monotonic() - last_camera_ok > 5.0:
                         self.logger.warning("Camera read timeout; reopening source")
                         cap.release()
                         stop_event.wait(0.5)
                         cap = cv2.VideoCapture(camera_source)
-                        last_camera_ok = time.time()
+                        last_camera_ok = time.monotonic()
                     continue
 
-                last_camera_ok = time.time()
-                self.last_frame_ok = last_camera_ok
+                last_camera_ok = time.monotonic()
+                self.last_frame_mono = last_camera_ok
                 frame = cv2.resize(frame, (640, 360))
                 encoded, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
                 if not encoded:
                     continue
 
                 data = buffer.tobytes()
-                max_chunk = MAX_UDP_PAYLOAD - HEADER_SIZE - (NONCE_SIZE + TAG_SIZE if self.encrypt_udp else 0)
-                total_chunks = (len(data) + max_chunk - 1) // max_chunk
-                if total_chunks <= 0 or total_chunks > 65535:
+                max_plain = MAX_UDP_PAYLOAD - HEADER_SIZE
+                if self.encrypt_udp:
+                    max_plain -= NONCE_SIZE + TAG_SIZE
+                total_chunks = (len(data) + max_plain - 1) // max_plain
+                if total_chunks <= 0 or total_chunks > MAX_FRAME_CHUNKS or len(data) > MAX_FRAME_BYTES:
+                    self.logger.warning("Encoded frame exceeds protocol bounds; dropping frame")
                     continue
 
-                if self.require_auth and time.time() - last_auth > self.auth_refresh_s:
+                now = time.monotonic()
+                if self.require_auth and (self.force_auth or now - last_auth >= self.auth_refresh_s):
                     self._send_auth()
-                    last_auth = time.time()
+                    last_auth = now
 
                 base_nonce = get_random_bytes(NONCE_SIZE) if self.encrypt_udp else None
                 for chunk_index in range(total_chunks):
-                    payload = data[chunk_index * max_chunk:(chunk_index + 1) * max_chunk]
+                    plain = data[chunk_index * max_plain:(chunk_index + 1) * max_plain]
+                    payload_size = len(plain)
+                    if self.encrypt_udp:
+                        payload_size += NONCE_SIZE + TAG_SIZE
+                    header = pack_header(frame_id, total_chunks, chunk_index, payload_size)
                     if self.encrypt_udp:
                         cipher = AES.new(self.udp_key, AES.MODE_GCM, nonce=_derive_nonce(base_nonce, chunk_index))
-                        ciphertext, tag = cipher.encrypt_and_digest(payload)
-                        payload = (base_nonce + tag + ciphertext) if chunk_index == 0 else (tag + ciphertext)
-                    header = struct.pack(HEADER_FORMAT, frame_id, total_chunks, chunk_index, len(payload))
+                        cipher.update(header)
+                        ciphertext, tag = cipher.encrypt_and_digest(plain)
+                        payload = base_nonce + tag + ciphertext
+                    else:
+                        payload = plain
                     self._send_packet(header + payload)
 
-                frame_id = (frame_id + 1) % (2 ** 32)
+                frame_id += 1
+                if frame_id > MAX_DATA_FRAME_ID:
+                    frame_id = 0
                 if not _bool_env("WVAB_UDP_CLIENT_HEADLESS", "0"):
-                    cv2.imshow("Camera Client", frame)
+                    cv2.imshow("WVAB - Camera Client", frame)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
-                        break
+                        stop_event.set()
         finally:
             stop_event.set()
             cap.release()
@@ -865,7 +1019,10 @@ class UDPCameraClient:
                 self.sock.close()
             except Exception:
                 pass
-            cv2.destroyAllWindows()
+            if not _bool_env("WVAB_UDP_CLIENT_HEADLESS", "0"):
+                cv2.destroyAllWindows()
+        if self.watchdog_error:
+            raise RuntimeError(self.watchdog_error)
 
 
 def _build_parser():
@@ -928,10 +1085,13 @@ def main():
             "restart_delay": 2.0,
         },
     }
+
     config = _load_config(args.config) if args.config else {}
     _apply_config_env(config, args.mode)
     args = _apply_config_args(args, defaults[args.mode], config, args.mode)
 
+    if args.restart_max < 0 or args.restart_delay < 0:
+        raise SystemExit("restart-max and restart-delay must be non-negative")
     if args.log_path:
         os.environ["WVAB_UDP_LOG_PATH"] = args.log_path
     if args.log_level:
@@ -945,6 +1105,8 @@ def main():
             try:
                 runner(instance)
                 return
+            except KeyboardInterrupt:
+                return
             except Exception as exc:
                 attempts += 1
                 logger.exception("%s crashed: %s", label, exc)
@@ -954,15 +1116,21 @@ def main():
 
     if args.mode == "server":
         run_with_restart(
-            lambda: UDPVisionServer(args.host, args.port, args.model, args.language, args.labels, args.headless),
+            lambda: UDPVisionServer(
+                host=args.host,
+                port=args.port,
+                model_path=args.model,
+                language=args.language,
+                labels_path=args.labels,
+                headless=args.headless,
+            ),
             lambda server: server.receive_frames(),
             "UDP server",
         )
     else:
-        camera = 0 if str(args.camera) == "0" else args.camera
         run_with_restart(
             lambda: UDPCameraClient(args.server_ip, args.server_port),
-            lambda client: client.send_frames(camera),
+            lambda client: client.send_frames(args.camera),
             "UDP client",
         )
 
