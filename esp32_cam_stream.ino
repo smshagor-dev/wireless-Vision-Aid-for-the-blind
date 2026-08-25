@@ -18,6 +18,8 @@
 //   chunk_index:uint16 | payload_size:uint16
 // Every encrypted packet carries: base_nonce[12] | GCM tag[16] | ciphertext.
 // The complete 14-byte header is authenticated as AES-GCM AAD.
+// Authentication plaintext v2:
+//   version:uint8 | auth_counter:uint64 | next_frame_id:uint32 | token:utf8
 
 #define TARGET_FPS 12
 #define MIN_FRAME_INTERVAL_MS (1000 / TARGET_FPS)
@@ -30,12 +32,15 @@ const uint16_t HEADER_SIZE = 14;
 const uint16_t NONCE_SIZE = 12;
 const uint16_t TAG_SIZE = 16;
 const uint16_t MAX_FRAME_CHUNKS = 1024;
+const uint16_t AUTH_PREFIX_SIZE = 13;
+const uint8_t AUTH_PAYLOAD_VERSION = 2;
 const uint32_t AUTH_FRAME_ID = 0xFFFFFFFFu;
 const uint32_t MAX_DATA_FRAME_ID = 0xFFFFFFFEu;
 
 WiFiUDP udp;
 uint32_t session_id = 0;
 uint32_t frame_id = 0;
+uint64_t auth_counter = 0;
 
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
@@ -91,6 +96,17 @@ static void validate_secrets() {
   } else if (strlen(WVAB_WIFI_SSID) == 0 || strlen(WVAB_WIFI_PASSWORD) < 8) {
     halt_with_error("station Wi-Fi credentials are invalid");
   }
+}
+
+static void write_u64(uint8_t* buf, uint64_t value) {
+  buf[0] = (value >> 56) & 0xFF;
+  buf[1] = (value >> 48) & 0xFF;
+  buf[2] = (value >> 40) & 0xFF;
+  buf[3] = (value >> 32) & 0xFF;
+  buf[4] = (value >> 24) & 0xFF;
+  buf[5] = (value >> 16) & 0xFF;
+  buf[6] = (value >> 8) & 0xFF;
+  buf[7] = value & 0xFF;
 }
 
 static void write_u32(uint8_t* buf, uint32_t value) {
@@ -167,16 +183,25 @@ static bool send_packet(
 static bool send_auth_packet() {
   const size_t token_len = strlen(WVAB_UDP_TOKEN);
   if (token_len < 16 || token_len > 256 || session_id == 0) return false;
+  if (auth_counter == 0xFFFFFFFFFFFFFFFFULL) return false;
 
-  const uint16_t payload_len = static_cast<uint16_t>(NONCE_SIZE + TAG_SIZE + token_len);
+  const uint64_t next_auth_counter = auth_counter + 1;
+  const size_t clear_len = AUTH_PREFIX_SIZE + token_len;
+  const uint16_t payload_len = static_cast<uint16_t>(NONCE_SIZE + TAG_SIZE + clear_len);
   uint8_t header[HEADER_SIZE];
   build_header(header, session_id, AUTH_FRAME_ID, 0, 0, payload_len);
+
+  uint8_t cleartext[AUTH_PREFIX_SIZE + 256];
+  cleartext[0] = AUTH_PAYLOAD_VERSION;
+  write_u64(cleartext + 1, next_auth_counter);
+  write_u32(cleartext + 9, frame_id);
+  memcpy(cleartext + AUTH_PREFIX_SIZE, WVAB_UDP_TOKEN, token_len);
 
   uint8_t base_nonce[NONCE_SIZE];
   esp_fill_random(base_nonce, sizeof(base_nonce));
   uint8_t nonce[NONCE_SIZE];
   derive_nonce(base_nonce, 0, nonce);
-  uint8_t ciphertext[256];
+  uint8_t ciphertext[AUTH_PREFIX_SIZE + 256];
   uint8_t tag[TAG_SIZE];
 
   mbedtls_gcm_context ctx;
@@ -184,12 +209,12 @@ static bool send_auth_packet() {
   const int rc = mbedtls_gcm_crypt_and_tag(
       &ctx,
       MBEDTLS_GCM_ENCRYPT,
-      token_len,
+      clear_len,
       nonce,
       NONCE_SIZE,
       header,
       HEADER_SIZE,
-      reinterpret_cast<const uint8_t*>(WVAB_UDP_TOKEN),
+      cleartext,
       ciphertext,
       TAG_SIZE,
       tag);
@@ -198,7 +223,9 @@ static bool send_auth_packet() {
     Serial.printf("Auth encryption failed: %d\n", rc);
     return false;
   }
-  return send_packet(header, base_nonce, tag, ciphertext, token_len);
+  if (!send_packet(header, base_nonce, tag, ciphertext, clear_len)) return false;
+  auth_counter = next_auth_counter;
+  return true;
 }
 
 static bool send_udp_frame(camera_fb_t* fb) {
@@ -360,6 +387,7 @@ void setup() {
     session_id = esp_random();
   } while (session_id == 0);
   frame_id = 0;
+  auth_counter = 0;
 
   configure_camera();
   connect_wifi();

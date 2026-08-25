@@ -23,8 +23,8 @@ RUN python -m pip install --upgrade pip \
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin wvab
 COPY --chown=wvab:wvab . /app
-RUN mkdir -p /app/logs /tmp/Ultralytics \
-    && chown -R wvab:wvab /app/logs /tmp/Ultralytics
+RUN mkdir -p /app/logs /var/lib/wvab /tmp/Ultralytics \
+    && chown -R wvab:wvab /app/logs /var/lib/wvab /tmp/Ultralytics
 
 USER wvab
 

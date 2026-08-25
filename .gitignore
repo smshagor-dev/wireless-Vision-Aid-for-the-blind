@@ -34,7 +34,12 @@ cpp/build/
 *.log
 wvab_*_health.json
 navigation_state.json
+state/
 *.tmp
+
+# Validation evidence (may contain host/runtime metadata)
+evidence/*.csv
+evidence/*.json
 
 # Training / export artifacts
 runs/
