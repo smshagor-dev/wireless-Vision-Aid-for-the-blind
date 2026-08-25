@@ -44,6 +44,7 @@ class Esp32FrameReceiver {
   DateTime? _authorizedUntil;
   int? _lastCompletedFrameId;
   int _completedFrames = 0;
+  DateTime? _lastFrameAt;
 
   Stream<Uint8List> get frames => _frames.stream;
   Stream<Esp32ReceiverStats> get stats => _stats.stream;
@@ -84,6 +85,8 @@ class Esp32FrameReceiver {
     _lastCompletedFrameId = null;
     _inflight.clear();
     _inflightOrder.clear();
+    _completedFrames = 0;
+    _lastFrameAt = null;
     _emitStats(false);
   }
 
@@ -95,7 +98,7 @@ class Esp32FrameReceiver {
 
   Future<void> _handleDatagram(Datagram datagram) async {
     final packet = datagram.data;
-    if (packet.length < wvabUdpHeaderSize) return;
+    if (packet.length < wvabUdpHeaderSize || packet.length > wvabUdpMaxPayload) return;
     late final WvabUdpHeader header;
     try {
       header = WvabUdpHeader.parse(Uint8List.sublistView(packet, 0, wvabUdpHeaderSize));
@@ -142,6 +145,7 @@ class Esp32FrameReceiver {
     if (frame.length > wvabUdpMaxFrameBytes) return;
     _lastCompletedFrameId = header.frameId;
     _completedFrames++;
+    _lastFrameAt = DateTime.now();
     _frames.add(frame);
     _emitStats(true);
   }
@@ -177,11 +181,20 @@ class Esp32FrameReceiver {
     if (!accepted) return;
 
     final baseline = previousWvabFrameId(auth.nextFrameId);
-    if (_authorizedSessionId == header.sessionId &&
+    final sameSession = _authorizedAddress?.address == address.address &&
+        _authorizedPort == sourcePort &&
+        _authorizedSessionId == header.sessionId;
+    if (sameSession &&
         _lastCompletedFrameId != null &&
         baseline != _lastCompletedFrameId &&
         !wvabFrameIdIsNewer(baseline, _lastCompletedFrameId)) {
       return;
+    }
+
+    if (!sameSession) {
+      _inflight.clear();
+      _inflightOrder.clear();
+      _lastCompletedFrameId = null;
     }
     _authorizedAddress = address;
     _authorizedPort = sourcePort;
@@ -195,7 +208,9 @@ class Esp32FrameReceiver {
   }
 
   Future<Uint8List> _decryptPayload(Uint8List header, Uint8List payload, int chunkIndex) async {
-    if (payload.length <= wvabUdpNonceSize + wvabUdpTagSize) throw const FormatException('Encrypted packet too short.');
+    if (payload.length <= wvabUdpNonceSize + wvabUdpTagSize) {
+      throw const FormatException('Encrypted packet too short.');
+    }
     final key = _secretKey;
     if (key == null) throw StateError('ESP32 receiver key is unavailable.');
     final baseNonce = Uint8List.fromList(payload.sublist(0, wvabUdpNonceSize));
@@ -249,7 +264,7 @@ class Esp32FrameReceiver {
     _stats.add(Esp32ReceiverStats(
       authenticated: authenticated && _authorizedUntil != null && DateTime.now().isBefore(_authorizedUntil!),
       completedFrames: _completedFrames,
-      lastFrameAt: _completedFrames == 0 ? null : DateTime.now(),
+      lastFrameAt: _lastFrameAt,
     ));
   }
 
@@ -258,7 +273,10 @@ class Esp32FrameReceiver {
     if (!RegExp(r'^[0-9a-fA-F]+$').hasMatch(clean) || !clean.length.isEven) {
       throw const FormatException('AES key must be hexadecimal.');
     }
-    return List<int>.generate(clean.length ~/ 2, (i) => int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16));
+    return List<int>.generate(
+      clean.length ~/ 2,
+      (i) => int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16),
+    );
   }
 
   bool _constantTimeEquals(List<int> a, List<int> b) {
