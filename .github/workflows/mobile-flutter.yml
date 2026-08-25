@@ -90,8 +90,8 @@ jobs:
           import json
 
           branding = {
-              Path('.generated/wvab_launcher.png'): '3dd7859dabcc70ea7b5b8069b46b532a85924239b29d27e7aa7344ebe6467c43',
-              Path('.generated/wvab_launcher_foreground.png'): '97aea4f3229f4fef747ab1d531dfec8e2bd3df5ea12157d5f3865190f10ea574',
+              Path('.generated/wvab_launcher.png'): 'b1a3b209775db713543a5c81ab28212edcf5c2dcfe39a60d33f917f03315296a',
+              Path('.generated/wvab_launcher_foreground.png'): 'ad4cbb708b8aa3380129c7c65fc0ecc4409dce2d4fdf4ebe8d83847e9a8caf69',
           }
           for path, digest in branding.items():
               actual = hashlib.sha256(path.read_bytes()).hexdigest()
