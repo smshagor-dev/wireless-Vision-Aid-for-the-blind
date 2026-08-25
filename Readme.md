@@ -17,7 +17,7 @@ WVAB is an offline-first computer-vision assistance platform for blind and low-v
 - Authenticated WebSocket runtime control for language, confidence, and object filtering
 - Health files, reconnect handling, watchdogs, and bounded auto-restart
 - Raspberry Pi edge service configuration
-- MiDaS depth research path with explicit metric-calibration gating
+- Optional MiDaS depth research path with explicit model provisioning and metric-calibration gating
 - Visual odometry and optional ORB-SLAM3 bridge
 - Occupancy-grid mapping and A* planning research pipeline
 - Fail-safe `STOP` / `DEGRADED` / `GUIDANCE_AVAILABLE` state output
@@ -35,6 +35,18 @@ python -m pip install -r requirements.txt
 ```
 
 Runtime dependency versions are bounded to compatible major versions. Lightweight CI dependencies are exactly pinned in `requirements-ci.txt`.
+
+## Model provisioning
+
+The small baseline `yolov8n.pt` remains in the repository for the core offline object-detection demo. The much larger MiDaS depth weight is intentionally excluded from source control.
+
+Prepare MiDaS once while online:
+
+```bash
+python tools/download_models.py midas
+```
+
+The provisioner downloads the official MiDaS v2.1 small asset, verifies its SHA256 before installation, and prepares the Torch Hub source cache required for later offline depth startup. If `WVAB_OFFLINE=1` and those local assets are missing, depth is disabled cleanly instead of silently reaching the network.
 
 ## Quick start
 
@@ -73,7 +85,7 @@ For local control, send the token with every JSON command:
 {"token":"<control-token>","cmd":"status"}
 ```
 
-The server validates the token using constant-time comparison and validates command values before applying changes. If remote control is intentionally required, set `WVAB_WS_CONTROL_HOST=0.0.0.0` only on a trusted network/firewall boundary and keep a unique `WVAB_WS_TOKEN` configured.
+The server validates the token using constant-time comparison and validates command values before applying changes. If remote control is intentionally required, set `WVAB_WS_CONTROL_HOST=0.0.0.0` only behind a trusted network/TLS boundary and keep a unique `WVAB_WS_TOKEN` configured.
 
 ## Distance and depth semantics
 
@@ -123,7 +135,7 @@ pip install -r requirements.txt
 bash deployment/rpi/wvab_edge_start.sh
 ```
 
-`deployment/rpi/wvab_edge_start.sh` now refuses to start when UDP authentication/encryption is disabled, the token is blank, or the AES key is invalid. WebSocket control stays loopback-only by default.
+`deployment/rpi/wvab_edge_start.sh` refuses to start when UDP authentication/encryption is disabled, the token is blank, or the AES key is invalid. WebSocket control stays loopback-only by default.
 
 ## Training and export
 
@@ -145,7 +157,7 @@ python -m pip install -r requirements-ci.txt
 python -m pytest -q
 ```
 
-The test suite covers configuration validation, proximity semantics, calibrated-distance math, Unicode font selection, control-channel secret handling, missing-depth handling, fail-safe state output, occupancy-grid behavior, and A* obstacle avoidance.
+The test suite covers configuration validation, proximity semantics, calibrated-distance math, Unicode font selection, control-channel secret handling, model checksum handling, missing-depth handling, fail-safe state output, occupancy-grid behavior, and A* obstacle avoidance.
 
 Full runtime smoke import is opt-in because it requires heavyweight ML/device dependencies:
 
@@ -157,7 +169,7 @@ GitHub Actions runs core tests on Python 3.10, 3.11, and 3.12 and rejects tracke
 
 ## Repository hygiene
 
-Generated Python caches, CMake/Visual Studio build output, runtime logs, health files, local datasets, and derived export files are ignored. The currently vendored YOLO and MiDaS weights are retained intentionally to preserve the existing offline demo path; new/derived weights should be distributed as versioned release artifacts instead of being committed directly.
+Generated Python caches, CMake/Visual Studio build output, runtime logs, health files, local datasets, downloaded depth assets, and derived export files are ignored. New/derived model weights should be distributed through verified provisioning or versioned release artifacts instead of being committed directly.
 
 ## Production-readiness gates
 

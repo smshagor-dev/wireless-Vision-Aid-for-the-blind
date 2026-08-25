@@ -16,7 +16,17 @@ Normal camera helpers:
 ./quick_start.sh run phone
 ```
 
-## 2. Secure UDP server/client
+## 2. Optional MiDaS depth provisioning
+
+The 85 MB MiDaS weight is not stored in the source tree. To prepare depth support for later offline use, run once while online after installing runtime dependencies:
+
+```bash
+python tools/download_models.py midas
+```
+
+The downloader verifies the model checksum and prepares the Torch Hub source cache. Core YOLO object detection remains available from the local `yolov8n.pt` baseline without MiDaS.
+
+## 3. Secure UDP server/client
 
 Generate deployment-specific credentials and export them before using UDP mode:
 
@@ -42,7 +52,7 @@ Then start the server and sender:
 
 The quick-start script refuses UDP mode when the token is blank or the AES key length is invalid. WebSocket control is loopback-only by default and uses `WVAB_WS_TOKEN` when set, otherwise it reuses `WVAB_UDP_TOKEN`.
 
-## 3. C++ planner experiment
+## 4. C++ planner experiment
 
 Files:
 

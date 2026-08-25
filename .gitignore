@@ -42,15 +42,16 @@ data/custom_wvab/
 *.engine
 *_openvino_model/
 
+# Downloaded runtime models
+/data/models/
+
 # Local secrets/config overrides
 .env
 .env.*
 !deployment/rpi/wvab_edge.env
 wvab_config.local.json
 
-# Large model policy
-# The two currently vendored model files are retained intentionally for offline demos.
-# New/derived model weights should not be committed directly.
+# Derived model/export formats
 *.onnx
 *.tflite
 *.torchscript

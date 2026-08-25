@@ -11,6 +11,7 @@ from core.security import normalize_control_host, resolve_control_token, verify_
 from mapping.occupancy_grid import OccupancyGrid
 from navigation.a_star import a_star
 from perception.perception_mapping import detections_to_points
+from tools.download_models import sha256_file
 
 
 def _valid_config():
@@ -75,6 +76,12 @@ def test_control_security_defaults_to_loopback_and_requires_secret():
     assert verify_secret("udp-secret", "udp-secret") is True
     assert verify_secret("wrong", "udp-secret") is False
     assert verify_secret("anything", "") is False
+
+
+def test_model_checksum_helper(tmp_path):
+    sample = tmp_path / "sample.bin"
+    sample.write_bytes(b"abc")
+    assert sha256_file(sample) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 
 
 def test_depth_mapping_handles_unavailable_depth():
