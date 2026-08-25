@@ -116,19 +116,22 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             _SectionTitle(strings.get('chooseLanguage')),
             const SizedBox(height: 10),
             _Card(
-              child: Column(
-                children: AppStrings.supportedLanguages.entries.map((entry) {
-                  return RadioListTile<String>(
-                    key: Key('onboarding-language-${entry.key}'),
-                    value: entry.key,
-                    groupValue: _languageCode,
-                    activeColor: AppTheme.blue,
-                    title: Text(entry.value, style: const TextStyle(fontWeight: FontWeight.w700)),
-                    onChanged: (value) {
-                      if (value != null) setState(() => _languageCode = value);
-                    },
-                  );
-                }).toList(),
+              child: RadioGroup<String>(
+                groupValue: _languageCode,
+                onChanged: (value) {
+                  if (value != null) setState(() => _languageCode = value);
+                },
+                child: Column(
+                  children: AppStrings.supportedLanguages.entries.map((entry) {
+                    return RadioListTile<String>(
+                      key: Key('onboarding-language-${entry.key}'),
+                      value: entry.key,
+                      activeColor: AppTheme.blue,
+                      selected: entry.key == _languageCode,
+                      title: Text(entry.value, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    );
+                  }).toList(),
+                ),
               ),
             ),
             const SizedBox(height: 24),
@@ -188,7 +191,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               key: const Key('onboarding-finish'),
               onPressed: _saving ? null : _finish,
               icon: _saving
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
                   : const Icon(Icons.check_circle_outline_rounded),
               label: Text(strings.get('finishSetup')),
             ),
@@ -201,6 +208,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle(this.text);
+
   final String text;
 
   @override
@@ -212,6 +220,7 @@ class _SectionTitle extends StatelessWidget {
 
 class _Card extends StatelessWidget {
   const _Card({required this.child});
+
   final Widget child;
 
   @override
@@ -277,8 +286,10 @@ class _CameraChoice extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Icon(selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-                    color: selected ? AppTheme.blue : AppTheme.muted),
+                Icon(
+                  selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                  color: selected ? AppTheme.blue : AppTheme.muted,
+                ),
               ],
             ),
           ),
