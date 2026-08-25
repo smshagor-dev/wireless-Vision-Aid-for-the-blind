@@ -14,7 +14,7 @@ dependencies:
   flutter_tts: ^4.2.5
   flutter_onnxruntime: ^1.8.4
   shared_preferences: ^2.5.5
-  flutter_secure_storage: ^11.0.0
+  flutter_secure_storage: 10.2.0
   cryptography: ^2.9.0
   cryptography_flutter: ^2.3.4
   image: ^4.9.2
