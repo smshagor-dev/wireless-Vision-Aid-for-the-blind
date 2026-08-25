@@ -1,4 +1,7 @@
 -r requirements.txt
 
-# Optional Intel/OpenVINO export and runtime support.
+# Optional deterministic model export/runtime support.
+# TensorRT itself is platform/CUDA-specific and must be installed separately.
+onnx>=1.12,<2
+onnxslim>=0.1.82,<1
 openvino>=2024,<2027
