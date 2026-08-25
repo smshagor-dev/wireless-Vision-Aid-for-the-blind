@@ -31,7 +31,7 @@ Uint8List _concat(Iterable<List<int>> parts) {
 Uint8List _authCleartext({required int counter, required int nextFrameId}) {
   final tokenBytes = utf8.encode(_token);
   final bytes = Uint8List(wvabUdpAuthPrefixSize + tokenBytes.length);
-  final data = ByteData.sublistView(bytes)
+  ByteData.sublistView(bytes)
     ..setUint8(0, wvabUdpAuthPayloadVersion)
     ..setUint64(1, counter, Endian.big)
     ..setUint32(9, nextFrameId, Endian.big);
