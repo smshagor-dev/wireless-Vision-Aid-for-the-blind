@@ -47,17 +47,22 @@ require_udp_credentials() {
     echo "ERROR: WVAB_UDP_KEY_HEX must be a 16, 24, or 32-byte hexadecimal key." >&2
     exit 2
   fi
+  export WVAB_UDP_AUTH=1
+  export WVAB_UDP_ENCRYPT=1
+  export WVAB_ALLOW_INSECURE_UDP=0
 }
 
 run_doctor() {
   activate_env
   python "${ROOT_DIR}/test_system.py" "$@"
 }
+
 run_esp32_edge() {
   activate_env
   export WVAB_PYTHON_BIN="$(command -v python)"
-  bash "${ROOT_DIR}/deployment/rpi/wvab_edge_start.sh"
+  bash "${ROOT_DIR}/deployment/rpi/wvab_edge_start.sh" "$@"
 }
+
 run_phone() {
   local camera_url="${1:-}"
   if [[ -z "$camera_url" ]]; then
@@ -69,20 +74,28 @@ run_phone() {
   activate_env
   python "${ROOT_DIR}/smartphone_camera.py" "$camera_url" "$@"
 }
+
 run_vision() {
   activate_env
   python "${ROOT_DIR}/vision_server.py" "$@"
 }
+
 run_udp_server() {
   activate_env
   require_udp_credentials
-  python "${ROOT_DIR}/udp_streaming.py" server --config "${ROOT_DIR}/wvab_config.sample.json"
+  python "${ROOT_DIR}/udp_streaming.py" server --config "${ROOT_DIR}/wvab_config.sample.json" "$@"
 }
+
 run_udp_client() {
   local server_ip="${1:-192.168.4.1}"
+  if [[ $# -gt 0 ]]; then shift; fi
   activate_env
   require_udp_credentials
-  python "${ROOT_DIR}/udp_streaming.py" client --config "${ROOT_DIR}/wvab_config.sample.json" --server-ip "$server_ip" --camera 0
+  python "${ROOT_DIR}/udp_streaming.py" client \
+    --config "${ROOT_DIR}/wvab_config.sample.json" \
+    --server-ip "$server_ip" \
+    --camera 0 \
+    "$@"
 }
 
 show_help() {
@@ -95,18 +108,24 @@ Usage:
   ./quick_start.sh run esp32
   ./quick_start.sh run vision [vision options]
   ./quick_start.sh run phone CAMERA_URL [phone options]
-  ./quick_start.sh run udp-server
-  ./quick_start.sh run udp-client [server_ip]
+  ./quick_start.sh run udp-server [server options]
+  ./quick_start.sh run udp-client [server_ip] [client options]
 
 ESP32 edge mode:
   python tools/generate_device_secrets.py --server-ip 192.168.4.2
   ./quick_start.sh doctor --deployment
   ./quick_start.sh run esp32
 
+Python UDP mode always forces authentication + encryption and requires:
+  WVAB_UDP_TOKEN=<unique token of at least 16 characters>
+  WVAB_UDP_KEY_HEX=<16/24/32-byte AES key as hex>
+
 Examples:
   ./quick_start.sh doctor --full --camera 0
   ./quick_start.sh run vision --camera 0
   ./quick_start.sh run phone http://192.168.1.20:8080/video --test-only
+  ./quick_start.sh run udp-server --language bn
+  ./quick_start.sh run udp-client 127.0.0.1 --camera 1
 EOF
 }
 
