@@ -9,7 +9,6 @@ if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
   echo "Python not found. Install Python 3.10+ first." >&2
   exit 1
 fi
-
 if ! "${PYTHON_BIN}" - <<'PY' >/dev/null 2>&1
 import sys
 raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
@@ -54,32 +53,36 @@ run_doctor() {
   activate_env
   python "${ROOT_DIR}/test_system.py" "$@"
 }
-
 run_esp32_edge() {
   activate_env
   export WVAB_PYTHON_BIN="$(command -v python)"
   bash "${ROOT_DIR}/deployment/rpi/wvab_edge_start.sh"
 }
-
 run_phone() {
+  local camera_url="${1:-}"
+  if [[ -z "$camera_url" ]]; then
+    echo "ERROR: run phone requires the exact trusted camera stream URL." >&2
+    echo "Example: ./quick_start.sh run phone http://192.168.1.20:8080/video" >&2
+    exit 2
+  fi
+  shift || true
   activate_env
-  python "${ROOT_DIR}/smartphone_camera.py"
+  python "${ROOT_DIR}/smartphone_camera.py" "$camera_url" "$@"
 }
-
+run_vision() {
+  activate_env
+  python "${ROOT_DIR}/vision_server.py" "$@"
+}
 run_udp_server() {
   activate_env
   require_udp_credentials
   python "${ROOT_DIR}/udp_streaming.py" server --config "${ROOT_DIR}/wvab_config.sample.json"
 }
-
 run_udp_client() {
   local server_ip="${1:-192.168.4.1}"
   activate_env
   require_udp_credentials
-  python "${ROOT_DIR}/udp_streaming.py" client \
-    --config "${ROOT_DIR}/wvab_config.sample.json" \
-    --server-ip "${server_ip}" \
-    --camera 0
+  python "${ROOT_DIR}/udp_streaming.py" client --config "${ROOT_DIR}/wvab_config.sample.json" --server-ip "$server_ip" --camera 0
 }
 
 show_help() {
@@ -90,44 +93,37 @@ Usage:
   ./quick_start.sh setup
   ./quick_start.sh doctor [--full] [--camera SOURCE] [--tts] [--deployment]
   ./quick_start.sh run esp32
-  ./quick_start.sh run phone
+  ./quick_start.sh run vision [vision options]
+  ./quick_start.sh run phone CAMERA_URL [phone options]
   ./quick_start.sh run udp-server
   ./quick_start.sh run udp-client [server_ip]
 
-ESP32 edge mode uses the generated deployment/rpi/wvab_edge.env file:
+ESP32 edge mode:
   python tools/generate_device_secrets.py --server-ip 192.168.4.2
   ./quick_start.sh doctor --deployment
   ./quick_start.sh run esp32
 
-Python UDP modes require these environment variables:
-  WVAB_UDP_KEY_HEX=<16/24/32-byte hex key>
-  WVAB_UDP_TOKEN=<unique token, at least 16 chars>
-
 Examples:
-  ./quick_start.sh setup
   ./quick_start.sh doctor --full --camera 0
-  ./quick_start.sh run esp32
-  ./quick_start.sh run phone
-  ./quick_start.sh run udp-server
-  ./quick_start.sh run udp-client 192.168.1.10
+  ./quick_start.sh run vision --camera 0
+  ./quick_start.sh run phone http://192.168.1.20:8080/video --test-only
 EOF
 }
 
 main() {
   local cmd="${1:-help}"
-  case "${cmd}" in
+  case "$cmd" in
     setup) setup_env ;;
-    doctor)
-      shift
-      run_doctor "$@"
-      ;;
+    doctor) shift; run_doctor "$@" ;;
     run)
       local mode="${2:-}"
-      case "${mode}" in
-        esp32) run_esp32_edge ;;
-        phone) run_phone ;;
-        udp-server) run_udp_server ;;
-        udp-client) run_udp_client "${3:-}" ;;
+      shift 2 || true
+      case "$mode" in
+        esp32) run_esp32_edge "$@" ;;
+        vision) run_vision "$@" ;;
+        phone) run_phone "$@" ;;
+        udp-server) run_udp_server "$@" ;;
+        udp-client) run_udp_client "$@" ;;
         *) show_help; exit 1 ;;
       esac
       ;;
