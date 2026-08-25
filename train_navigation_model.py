@@ -11,10 +11,10 @@ from typing import Any
 
 from offline_utils import configure_offline_env, ensure_local_model
 from training.runtime_validation import (
+    require_export_backend,
     require_non_negative,
     require_positive,
     validate_dataset_yaml,
-    validate_export_format,
 )
 
 
@@ -145,17 +145,20 @@ def run_val(args: argparse.Namespace) -> None:
 
 def run_export(args: argparse.Namespace) -> None:
     require_positive("imgsz", args.imgsz)
-    export_format = validate_export_format(args.format)
+    export_format = require_export_backend(args.format, simplify=args.simplify)
     offline = _configure_runtime(args.allow_online)
     model_path = _resolve_model(args.model, offline=offline)
     YOLO = _load_yolo()
     model = YOLO(model_path)
-    output = model.export(
-        format=export_format,
-        imgsz=args.imgsz,
-        half=args.half,
-        device=args.device,
-    )
+    export_kwargs = {
+        "format": export_format,
+        "imgsz": args.imgsz,
+        "half": args.half,
+        "device": args.device,
+    }
+    if export_format in {"onnx", "engine"}:
+        export_kwargs["simplify"] = args.simplify
+    output = model.export(**export_kwargs)
     print("Export complete")
     print(f"Exported: {output}")
 
@@ -209,6 +212,7 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--format", default="onnx", choices=["onnx", "openvino", "engine"])
     export.add_argument("--imgsz", type=int, default=640)
     export.add_argument("--half", action="store_true")
+    export.add_argument("--simplify", action="store_true", help="Use onnxslim for ONNX/TensorRT export")
     export.add_argument("--device", default="cpu")
     _add_online_flag(export)
 
