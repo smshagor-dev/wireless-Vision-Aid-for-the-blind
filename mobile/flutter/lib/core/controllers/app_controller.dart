@@ -12,6 +12,7 @@ import '../services/speech_service.dart';
 import '../vision/detection.dart';
 import '../vision/guidance_engine.dart';
 import '../vision/mobile_inference_engine.dart';
+import '../vision/vision_input.dart';
 
 enum LocalRuntimeState { idle, initializing, ready, error }
 
@@ -122,7 +123,10 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<MobileInferenceResult> processTensor(Float32List input) async {
+  Future<MobileInferenceResult> processTensor(
+    Float32List input, {
+    LetterboxTransform? transform,
+  }) async {
     if (_runtimeState != LocalRuntimeState.ready) {
       await ensureInferenceReady();
     }
@@ -130,11 +134,23 @@ class AppController extends ChangeNotifier {
       input,
       confidenceThreshold: _settings.detectionConfidence,
     );
-    final selected = result.detections
+
+    final remapped = result.detections.map((detection) {
+      final box = transform == null ? detection.box : transform.modelBoxToSource(detection.box);
+      return Detection(
+        classId: detection.classId,
+        label: detection.label,
+        confidence: detection.confidence,
+        box: box,
+      );
+    }).where((detection) => detection.box.area > 0).toList(growable: false);
+
+    final selected = remapped
         .where((detection) => _settings.detectedClasses.contains(detection.label))
         .toList(growable: false);
     _lastDetections = selected;
     _lastInferenceDuration = result.inferenceDuration;
+
     final event = guidanceEngine.choose(selected);
     if (event != null) {
       await announce(
