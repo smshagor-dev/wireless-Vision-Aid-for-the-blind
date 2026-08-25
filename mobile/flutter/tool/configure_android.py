@@ -32,6 +32,11 @@ def configure_manifest() -> None:
         )
         text = text.replace(application_marker, queries + application_marker, 1)
 
+    if 'android:label="wvab_mobile"' in text:
+        text = text.replace('android:label="wvab_mobile"', 'android:label="WVAB"', 1)
+    elif 'android:label="WVAB"' not in text:
+        raise SystemExit('Unexpected Android application label template')
+
     MANIFEST.write_text(text, encoding='utf-8')
 
 
