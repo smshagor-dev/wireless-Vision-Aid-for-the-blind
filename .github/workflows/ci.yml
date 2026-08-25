@@ -35,10 +35,41 @@ jobs:
           cache-dependency-path: requirements-ci.txt
 
       - name: Install CI dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -r requirements-ci.txt
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements-ci.txt
 
-      - name: Validate package metadata
-        run: python -m pip install --no-deps .
+      - name: Build distributable wheel
+        run: python -m pip wheel --no-deps --no-build-isolation . -w dist-ci
+
+      - name: Verify wheel contents
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          wheels = list(Path("dist-ci").glob("wvab_system-*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"expected exactly one WVAB wheel, found: {wheels}")
+          required = {
+              "core/config.py",
+              "mapping/occupancy_grid.py",
+              "navigation/a_star.py",
+              "perception/depth_estimator.py",
+              "training/runtime_validation.py",
+              "tools/download_models.py",
+              "vision_server.py",
+              "udp_streaming.py",
+          }
+          with zipfile.ZipFile(wheels[0]) as archive:
+              names = set(archive.namelist())
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(f"wheel is missing internal modules: {missing}")
+          PY
+
+      - name: Validate package install
+        run: python -m pip install --no-deps --force-reinstall dist-ci/wvab_system-*.whl
 
       - name: Compile Python source
         run: python -m compileall -q -x '(^|/)(cpp/build|__pycache__)(/|$)' .
@@ -54,6 +85,8 @@ jobs:
           python test_system.py --help >/dev/null
           python main.py --help >/dev/null
           python smartphone_camera.py --help >/dev/null
+          python train_navigation_model.py --help >/dev/null
+          python export_accelerated_models.py --help >/dev/null
 
       - name: Run unit tests
         run: python -m pytest -q
@@ -83,5 +116,9 @@ jobs:
           fi
           if git grep -n -E 'distance_m|about .* meters' -- vision_server.py smartphone_camera.py; then
             echo "Uncalibrated metric-distance language reintroduced in local vision runtime."
+            exit 1
+          fi
+          if [[ -e training/train_custom.py || -e camera_gui.py || -e dashboard_tk.py ]]; then
+            echo "Unsupported legacy runtime/training entrypoint reintroduced."
             exit 1
           fi
