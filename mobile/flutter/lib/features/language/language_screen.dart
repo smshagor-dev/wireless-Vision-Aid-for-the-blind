@@ -47,7 +47,7 @@ class LanguageScreen extends StatelessWidget {
                             if (context.mounted) Navigator.of(context).pop();
                           },
                           child: Container(
-                            minHeight: 64,
+                            constraints: const BoxConstraints(minHeight: 64),
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                             color: active ? const Color(0xFFF1F6FF) : Colors.transparent,
                             child: Row(
