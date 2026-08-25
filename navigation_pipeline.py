@@ -120,6 +120,7 @@ def main():
 
     intr = cam_cfg["intrinsics"]
     metric_depth_ready = bool(depth_cfg.get("metric_calibrated", False)) and bool(intr.get("calibrated", False))
+    metric_depth_scale = float(depth_cfg["scale_m"]) if metric_depth_ready else None
     if not metric_depth_ready:
         logger.warning(
             "Metric depth mapping disabled: camera/depth scale is not calibrated. "
@@ -136,6 +137,7 @@ def main():
 
     vo = VisualOdometry(intr["fx"], intr["fy"], intr["cx"], intr["cy"])
     slam_cfg = cfg["mapping"].get("slam", {})
+    orbslam_metric = bool(slam_cfg.get("metric_scale_calibrated", False))
     orbslam = None
     if slam_cfg.get("backend", "vo") == "orbslam3":
         orbslam = ORBSLAM3Bridge(
@@ -169,6 +171,8 @@ def main():
     last_goal = None
     last_goal_check = 0.0
     last_frame_ok = time.time()
+    last_metric_vo_scale = time.time()
+    localization_stale_s = float(cfg["navigation"].get("localization_stale_s", 1.5))
 
     try:
         while not stop_event.is_set():
@@ -185,30 +189,56 @@ def main():
             results = model(frame, verbose=False)
             detections = _extract_detections(results, cfg["perception"]["confidence"])
             depth_map = depth.predict(frame)
+            metric_depth_map = None
+            if metric_depth_ready and depth_map is not None:
+                metric_depth_map = depth_map * metric_depth_scale
 
-            pose = orbslam.read_pose() if orbslam is not None else None
+            pose = None
+            pose_source = "none"
+            localization_is_metric = False
+            localization_fresh = True
+
+            if orbslam is not None:
+                pose = orbslam.read_pose()
+                if pose is not None:
+                    pose_source = "orbslam3"
+                    localization_is_metric = orbslam_metric
+
             if pose is None:
-                pose, _ = vo.update(frame, depth_map=depth_map)
+                vo_input_depth = metric_depth_map if metric_depth_ready else depth_map
+                pose, vo_scale = vo.update(
+                    frame,
+                    depth_map=vo_input_depth,
+                    require_metric_depth=metric_depth_ready,
+                )
+                pose_source = "vo"
+                localization_is_metric = metric_depth_ready
+                if metric_depth_ready:
+                    if vo_scale is not None:
+                        last_metric_vo_scale = time.time()
+                    localization_fresh = (time.time() - last_metric_vo_scale) <= localization_stale_s
+
             if pose is None:
                 safety.stop("localization_unavailable")
                 continue
 
             map_is_metric = False
-            if metric_depth_ready and depth_map is not None:
+            if metric_depth_map is not None and localization_is_metric and localization_fresh:
                 update_grid_from_frame(
                     detections,
-                    depth_map,
+                    metric_depth_map,
                     grid,
                     intrinsics=intr,
-                    depth_scale=float(depth_cfg["scale_m"]),
+                    depth_scale=1.0,
                     sensor_origin=(pose[0], pose[1]),
                 )
                 map_is_metric = True
 
             if (
                 orbslam is not None
+                and pose_source == "orbslam3"
+                and localization_is_metric
                 and slam_cfg.get("use_map_points", True)
-                and bool(slam_cfg.get("metric_scale_calibrated", False))
             ):
                 points = orbslam.read_map_points()
                 if points:
@@ -229,15 +259,23 @@ def main():
             path = planner.plan(grid, start, goal)
             if metrics is not None:
                 metrics.observe_planner(time.time() - p0)
+
+            state_metadata = {
+                "pose": [float(pose[0]), float(pose[1])],
+                "localization_source": pose_source,
+                "localization_metric": localization_is_metric,
+                "localization_fresh": localization_fresh,
+                "map_metric": map_is_metric,
+            }
             if not path:
-                safety.stop("path_not_found", pose=[pose[0], pose[1]])
-            elif map_is_metric:
-                safety.guidance(path_points=len(path), pose=[pose[0], pose[1]])
+                safety.stop("path_not_found", **state_metadata)
+            elif map_is_metric and localization_is_metric and localization_fresh:
+                safety.guidance(path_points=len(path), **state_metadata)
             else:
                 safety.degraded(
-                    "uncalibrated_metric_geometry",
+                    "uncalibrated_or_stale_geometry",
                     path_points=len(path),
-                    pose=[pose[0], pose[1]],
+                    **state_metadata,
                 )
 
             frames += 1
