@@ -38,6 +38,7 @@ Legacy mock/duplicate GUI runtimes were removed because they displayed hard-code
 - optional ONNX/OpenVINO/TensorRT export validation
 - non-root Docker runtime with local-secret build exclusions
 - Python 3.10/3.11/3.12 CI definitions, wheel-content verification, and lightweight unit tests
+- clean C++17 planner build/demo validation in CI
 - SLSA source-provenance workflow for releases/manual provenance generation
 
 ## Requirements
@@ -152,20 +153,24 @@ WebSocket control belongs to the UDP server, binds to `127.0.0.1:8765` by defaul
 
 Generate local device/server credentials before running Compose. `.dockerignore` excludes local credential files from the image build context; Compose injects the server environment only at runtime.
 
+Use the wrapper so the generated `WVAB_UDP_PORT` is applied both inside the container and to the host UDP port mapping:
+
 ```bash
 python tools/generate_device_secrets.py --server-ip 192.168.4.2
-docker compose build
-docker compose up -d udp-vision-server
+bash deployment/docker_start.sh build
+bash deployment/docker_start.sh up -d udp-vision-server
 ```
 
-The image runs as non-root user `wvab`. The default server exposes only UDP 9999, disables TTS/WebSocket control inside the container, and enables a completed/decodeable-frame watchdog. The container health check requires both a fresh health record and a recent completed video frame.
+Do not replace the wrapper with a plain `docker compose up` when using a non-default generated port; Compose service `env_file` values are not used for YAML port interpolation unless the file is also supplied as Compose's `--env-file`.
+
+The image runs as non-root user `wvab`. The UDP server disables TTS/WebSocket control inside the container and enables a completed/decodeable-frame watchdog. The container health check requires both a fresh health record and a recent completed video frame.
 
 Optional headless navigation + Prometheus on Linux:
 
 ```bash
 export WVAB_VIDEO_GID="$(getent group video | cut -d: -f3)"
 export WVAB_CAMERA_DEVICE=/dev/video0
-docker compose --profile navigation up -d navigation-engine prometheus
+bash deployment/docker_start.sh --profile navigation up -d navigation-engine prometheus
 ```
 
 Host metrics ports bind only to loopback (`127.0.0.1:8000` and `127.0.0.1:9090`).
@@ -234,7 +239,7 @@ Full host diagnostics:
 ./quick_start.sh doctor --full --camera 0 --tts
 ```
 
-The CI definition covers Python 3.10/3.11/3.12, wheel content, Python compilation, shell/CLI syntax, UDP protocol/session tests, repository hygiene, secret exclusion, and known insecure-default regressions. A GitHub workflow being configured is not itself field-validation evidence; release hardware tests remain separate.
+The CI definition covers Python 3.10/3.11/3.12, wheel content plus isolated installed imports, Python compilation, shell/CLI syntax, UDP protocol/session tests, clean C++17 planner build/demo execution, repository hygiene, secret exclusion, container custom-port invariants, and known insecure-default regressions. A GitHub workflow being configured is not itself field-validation evidence; release hardware tests remain separate.
 
 ## Production-readiness gates
 
