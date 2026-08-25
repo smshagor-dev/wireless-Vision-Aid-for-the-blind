@@ -19,8 +19,11 @@ def test_v2_release_metadata_is_canonical():
     assert config["metadata"]["name"] == "wvab-system"
     assert config["metadata"]["version"] == "2.0.0"
     assert config["options"]["python_requires"] == ">=3.10"
-    assert config["metadata"]["long_description"] == "file: Readme.md"
+    assert config["metadata"]["long_description"] == "file: README.md"
+    assert config["metadata"]["license"] == "MIT"
     assert config["metadata"]["license_files"] == "LICENSE"
+    assert (ROOT / "README.md").is_file()
+    assert not (ROOT / "Readme.md").exists()
 
 
 def test_v2_wheel_contains_dispatcher_and_console_entrypoint():
@@ -50,3 +53,10 @@ def test_v2_package_discovery_includes_runtime_namespaces():
         "training*",
         "tools*",
     } <= include
+
+
+def test_fonts_are_explicit_package_data():
+    config = _setup_config()
+
+    assert config["options"].getboolean("include_package_data") is False
+    assert "fonts/*.ttf" in config["options.package_data"]["assets"]
