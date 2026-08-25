@@ -168,9 +168,9 @@ jobs:
           EOF
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add demo/README.md demo/SHA256SUMS.txt "$target"
+          git add demo/README.md demo/SHA256SUMS.txt "$target" tool/branding/wvab_launcher.b64.part*
           if git diff --cached --quiet; then
-            echo "Demo APK is already current."
+            echo "Demo APK and launcher source are already current."
             exit 0
           fi
           git commit -m "Publish rebuilt WVAB demo with restored launcher icon [skip ci]"
