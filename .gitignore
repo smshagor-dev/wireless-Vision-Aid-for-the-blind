@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+cpp/build/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# Runtime artifacts
+*.log
+wvab_*_health.json
+navigation_state.json
+*.tmp
+
+# Training / export artifacts
+runs/
+data/custom_wvab/
+*.engine
+*_openvino_model/
+
+# Local secrets/config overrides
+.env
+.env.*
+!deployment/rpi/wvab_edge.env
+wvab_config.local.json
+
+# Large model policy
+# The two currently vendored model files are retained intentionally for offline demos.
+# New/derived model weights should not be committed directly.
+*.onnx
+*.tflite
+*.torchscript

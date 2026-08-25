@@ -1,9 +1,16 @@
-# --------------------------------------------------------------------------------------------- # 
-# | Name: Md. Shahanur Islam Shagor                                                           | # 
-# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
-# | Voronezh State University of Forestry and Technologies                                    | # 
-# | Build for Blind people within 15$                                                         | # 
-# --------------------------------------------------------------------------------------------- # 
+import os
+
+import pytest
+
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        os.environ.get("WVAB_FULL_SMOKE") != "1",
+        reason="Full smoke test requires WVAB runtime dependencies, models, and device-capable environment.",
+    ),
+]
+
 
 def test_imports():
     import camera_gui  # noqa: F401

@@ -1,21 +1,21 @@
-# --------------------------------------------------------------------------------------------- # 
-# | Name: Md. Shahanur Islam Shagor                                                           | # 
-# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
-# | Voronezh State University of Forestry and Technologies                                    | # 
-# | Build for Blind people within 15$                                                         | # 
-# --------------------------------------------------------------------------------------------- # 
-
-
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "wvab-system"
-version = "0.1.0"
-description = "WVAB Autonomous Navigation System"
+version = "1.0.1"
+description = "Wireless Vision-Aid for the Blind (WVAB)"
 authors = [
   { name = "Md. Shahanur Islam Shagor" }
 ]
 readme = "Readme.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "integration: requires full WVAB runtime dependencies and device/model access",
+]

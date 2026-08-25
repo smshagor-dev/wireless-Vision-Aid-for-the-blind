@@ -1,266 +1,182 @@
-<!--
-Name: Md. Shahanur Islam Shagor
-Autonomous Systems & UAV Researcher | Cybersecurity Specialist | Software Engineer
-Voronezh State University of Forestry and Technologies
-Build for Blind people within 15$
--->
-
 # Wireless Vision-Aid for the Blind (WVAB)
 
-WVAB is a real-time vision assistance system for blind and low-vision users.  
-It detects objects from camera input and provides spoken guidance with position and distance.
+WVAB is an offline-first computer-vision assistance platform for blind and low-vision users. It combines real-time object detection, multilingual spoken guidance, secure camera streaming, optional depth/localization research modules, and Raspberry Pi edge deployment.
 
-## Features
-- Real-time object detection (YOLOv8)
-- Audio feedback for object position and distance
-- GUI-based real camera testing
-- Multilingual labels from JSON
-- Runtime language selection
-- Smartphone camera support (IP stream)
-- Raspberry Pi edge mode (ESP32-CAM -> Pi -> audio)
-- Model training, validation, and export utilities
-- Optional Windows C++ speech backend (`wvab_speaker.exe`)
+> **Safety status:** WVAB is a research/assistive prototype, not a certified mobility or medical device. Qualitative proximity from a monocular bounding box or uncalibrated MiDaS/VO/monocular-SLAM output must not be interpreted as metric distance or proof that a route is safe.
 
-## Project Structure
-- `vision_server.py`: Main runtime for ESP32/IP camera streams
-- `camera_gui.py`: Desktop GUI camera test and live detection
-- `test_system.py`: End-to-end diagnostics and real test launcher
-- `smartphone_camera.py`: Smartphone IP camera setup helper
-- `train_navigation_model.py`: Train/val/export for YOLO models
-- `multilingual_labels.common.json`: Main multilingual labels + phrase map
-- `multilingual_labels.sample.json`: Sample mapping file
-- `deployment/rpi/wvab_edge.env`: Raspberry Pi edge environment defaults
-- `deployment/rpi/wvab_edge_start.sh`: Raspberry Pi edge start script
-- `deployment/rpi/wvab_edge.service`: Raspberry Pi systemd service
-- `tools/update_goal.py`: Update navigation goal file for dynamic planning
-- `install_tts_voice_packs.ps1`: Windows language/speech pack installer
-- `cpp/speaker_cli.cpp`: Windows SAPI speech CLI (for optional C++ speech path)
+## Current capabilities
+
+- YOLOv8 real-time object detection
+- Qualitative proximity guidance (`immediate`, `close`, `medium`, `far`)
+- Optional calibrated pinhole-distance utility for controlled experiments
+- Multilingual labels and TTS
+- Bundled Bengali, Devanagari, and Arabic overlay fonts
+- Webcam, smartphone/IP camera, and ESP32-CAM paths
+- Secure UDP transport with AES-GCM and token authentication enabled by default
+- IoU-based temporal object tracking
+- WebSocket runtime control for language, confidence, and object filtering
+- Health files, reconnect handling, watchdogs, and bounded auto-restart
+- Raspberry Pi edge service configuration
+- MiDaS depth research path with explicit metric-calibration gating
+- Visual odometry and optional ORB-SLAM3 bridge
+- Occupancy-grid mapping and A* planning research pipeline
+- Fail-safe `STOP` / `DEGRADED` / `GUIDANCE_AVAILABLE` state output
+- OpenVINO/TensorRT export utilities
+- Deterministic lightweight CI tests plus opt-in full integration smoke tests
 
 ## Requirements
-- Python 3.8+
-- Windows recommended for current TTS flow
-- Camera (webcam / ESP32-CAM / smartphone IP camera)
-- `pip install -r requirements.txt`
 
-## Quick Start
-1. Install dependencies:
-```powershell
-pip install -r requirements.txt
+- Python 3.10+
+- Local camera, smartphone stream, or ESP32-CAM
+- A local YOLO model for offline use
+
+```bash
+python -m pip install -r requirements.txt
 ```
 
-2. Run full diagnostics and GUI test:
-```powershell
+Runtime dependency versions are bounded to compatible major versions. Lightweight CI dependencies are exactly pinned in `requirements-ci.txt`.
+
+## Quick start
+
+```bash
 python test_system.py
-```
-
-3. Run main server:
-```powershell
 python vision_server.py
 ```
 
-## Offline (Edge AI) Mode
-Basic object detection works fully offline using a local YOLO model.
+For secure UDP streaming, generate deployment-specific credentials first:
 
-Requirements:
-- Keep a local model file in the project (default: `yolov8n.pt`)
-- No internet connection is needed once the model file is present
-
-By default, WVAB forces offline behavior for Ultralytics. If you want to allow
-online downloads later, set:
-```powershell
-$env:WVAB_OFFLINE = "0"
+```bash
+python - <<'PY'
+import os, secrets
+print("WVAB_UDP_KEY_HEX=" + os.urandom(32).hex())
+print("WVAB_UDP_TOKEN=" + secrets.token_urlsafe(24))
+PY
 ```
 
-## Language and Voice
+Then export them in your environment and run:
 
-### Text Language
-- Object names and phrases come from `multilingual_labels.common.json`.
-- Add new languages by adding language keys (for example `ru`, `bn`, `hi`) in JSON.
-- Test flow and server startup both support language selection.
-
-### Voice Language (Real Device)
-- Spoken language requires installed TTS voice packs on the device.
-- If selected voice is unavailable, system attempts default voice.
-
-Install voice packs (Run as Administrator):
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\install_tts_voice_packs.ps1 -Languages ru-RU,en-US -CopyToSettings
+```bash
+python udp_streaming.py server --config wvab_config.sample.json
+python udp_streaming.py client --config wvab_config.sample.json
 ```
 
-Install any language:
-```powershell
-.\install_tts_voice_packs.ps1 -Languages "bn,hi,ar" -CopyToSettings
-.\install_tts_voice_packs.ps1 -Languages hi-IN,bn-BD,fr-FR -CopyToSettings
+Do not deploy the example key/token from `wvab_config.sample.json` unchanged.
+
+## WebSocket control
+
+The UDP server exposes a control socket on port `8765` by default when `WVAB_WS_CONTROL=1`.
+
+Supported JSON commands:
+
+```json
+{"cmd":"set_language","value":"bn"}
+{"cmd":"set_all_objects","value":true}
+{"cmd":"set_confidence","value":0.4}
+{"cmd":"status"}
 ```
 
-Expose OneCore voices to SAPI (Run as Administrator):
-```powershell
-.\enable_onecore_voices.ps1
-```
+The server validates language and confidence values before applying them.
 
-### Font Support for BN/HI/AR Overlay
-If camera overlay shows `[][][][]`, install fonts or use bundled Noto fonts in `assets/fonts`:
+## Distance and depth semantics
+
+The normal realtime assistant uses **qualitative proximity**, not meters. Bounding-box size alone is not a reliable metric-distance sensor.
+
+`core.proximity.estimate_metric_distance()` is available only for controlled experiments where both focal length and physical object height assumptions are explicitly supplied. It should not be used as a general blind-navigation distance sensor.
+
+MiDaS output is monocular and scale-ambiguous. The navigation pipeline therefore keeps metric occupancy updates disabled unless both camera intrinsics and a depth scale have been externally calibrated and enabled in `config/config.yaml`.
+
+## Navigation safety state
+
+`navigation_pipeline.py` writes an atomic state file configured by `navigation.safety_state_file`:
+
+- `STOP`: camera/localization/path is unavailable
+- `DEGRADED`: a path exists but geometry is not calibrated for metric use
+- `GUIDANCE_AVAILABLE`: a path exists using an explicitly calibrated metric mapping source
+
+This replaces the previous placeholder motor-stop function. Hardware-specific audio/haptic/actuator adapters should consume this state and implement their own certified fail-safe behavior.
+
+## Multilingual fonts and speech
+
+Bundled overlay fonts:
+
 - `assets/fonts/NotoSansBengali-Regular.ttf`
 - `assets/fonts/NotoSansDevanagari-Regular.ttf`
 - `assets/fonts/NotoNaskhArabic-Regular.ttf`
 
-You can also force a font:
-```powershell
-$env:WVAB_FONT_PATH="C:\Path\To\YourFont.ttf"
-```
+The runtime now checks bundled fonts for Bengali/Hindi/Arabic before falling back to system fonts. `WVAB_FONT_PATH` can override the selection.
 
-### Depth Model (MiDaS)
-If depth shows "Unavailable", ensure MiDaS weights exist:
-```powershell
-$env:WVAB_MIDAS_WEIGHTS="data\models\midas_v21_small_256.pt"
-python training\depth_diag.py
-```
-
-## Optional: Build C++ Speaker (Windows)
-If `wvab_speaker.exe` exists, runtime can use it for speech.
+TTS still depends on voices installed on the target OS. Windows voice-pack helpers remain available:
 
 ```powershell
-cmake -S cpp -B cpp/build
-cmake --build cpp/build --config Release --target wvab_speaker
+.\install_tts_voice_packs.ps1 -Languages ru-RU,en-US,bn-BD,hi-IN -CopyToSettings
+.\enable_onecore_voices.ps1
 ```
 
-Output should be available at one of:
-- `cpp/build/wvab_speaker.exe`
-- `cpp/build/Release/wvab_speaker.exe`
+## Raspberry Pi edge mode
 
-## Training Custom Models
-Train:
-```powershell
-python train_navigation_model.py train --data data/wvab.yaml --model yolov8n.pt --epochs 80 --device 0
-```
+The Pi can act as the processing/audio node while an ESP32-CAM stays on the wearable camera side.
 
-Validate:
-```powershell
-python train_navigation_model.py val --model runs/wvab/navigation/weights/best.pt --data data/wvab.yaml
-```
-
-Export:
-```powershell
-python train_navigation_model.py export --model runs/wvab/navigation/weights/best.pt --format onnx
-```
-
-With multilingual mapping output:
-```powershell
-python train_navigation_model.py train --data data/wvab.yaml --language-map multilingual_labels.sample.json --labels-out runs/wvab/multilingual_labels.json
-```
-
-## Accelerated Inference (TensorRT / OpenVINO)
-For production latency, export optimized models:
-
-```powershell
-# Set model path (optional)
-$env:WVAB_MODEL="yolov8n.pt"
-python export_accelerated_models.py
-```
-
-Outputs:
-- TensorRT: `.engine`
-- OpenVINO: `<model>_openvino_model/` (example: `yolov8n_openvino_model/`)
-
-Run with OpenVINO (no code change needed):
-```powershell
-$env:WVAB_OPENVINO = "1"
-$env:WVAB_MODEL = "yolov8n.pt"
-python vision_server.py
-```
-
-Or point directly to the OpenVINO export:
-```powershell
-$env:WVAB_OPENVINO = "1"
-$env:WVAB_MODEL = "yolov8n_openvino_model"
-python vision_server.py
-```
-
-## Smartphone Camera Mode
-```powershell
-python smartphone_camera.py
-```
-
-Use manual IP mode for faster setup.
-
-## Raspberry Pi Edge (ESP32-CAM -> Pi -> Audio)
-Use your Raspberry Pi 4 as the "central brain" and keep the ESP32-CAM on glasses.
-The Pi receives the low-latency stream and plays audio over Bluetooth or wired earphones.
-
-1. Install dependencies on Raspberry Pi:
 ```bash
 sudo apt update
 sudo apt install -y python3-pip python3-venv espeak-ng libatlas-base-dev
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-2. Configure Pi edge env:
-```bash
-nano deployment/rpi/wvab_edge.env
-```
-
-3. Start the UDP vision server:
-```bash
 bash deployment/rpi/wvab_edge_start.sh
 ```
 
-4. On ESP32-CAM, set `UDP_HOST` to the Pi IP and flash `esp32_cam_stream.ino`.
+Review `deployment/rpi/wvab_edge.env` and replace all deployment credentials before use.
 
-See `production.md` for the full end-to-end Raspberry Pi flow (hardware, software mapping, voice).
+## Training and export
 
-## Secure UDP + WebSocket Control
-Encrypted UDP is supported for low-latency video with privacy protection.
-
-Config file (recommended):
-```powershell
-python udp_streaming.py server --config wvab_config.sample.json
-python udp_streaming.py client --config wvab_config.sample.json
+```bash
+python train_navigation_model.py train --data training/wvab_custom.yaml --model yolov8n.pt --epochs 80 --device 0
+python train_navigation_model.py val --model runs/wvab/navigation/weights/best.pt --data training/wvab_custom.yaml
+python train_navigation_model.py export --model runs/wvab/navigation/weights/best.pt --format onnx
+python export_accelerated_models.py
 ```
 
-Server (UDP Vision):
-```powershell
-$env:WVAB_UDP_ENCRYPT = "1"
-$env:WVAB_UDP_KEY_HEX = "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20"
-$env:WVAB_UDP_AUTH = "1"
-$env:WVAB_UDP_TOKEN = "change-me"
-$env:WVAB_UDP_HEALTH_PATH = "wvab_udp_server_health.json"
-python udp_streaming.py server --host 0.0.0.0 --port 9999 --language en --headless --auto-restart
+The custom schema includes mobility-relevant classes such as crosswalk, curb, pothole, pole, road cone, stairs, and door. Dataset quality and real-world validation remain separate research requirements.
+
+## Testing
+
+Fast, device-independent validation:
+
+```bash
+python -m pip install -r requirements-ci.txt
+python -m pytest -q
 ```
 
-Client (Python webcam):
-```powershell
-$env:WVAB_UDP_ENCRYPT = "1"
-$env:WVAB_UDP_KEY_HEX = "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20"
-$env:WVAB_UDP_AUTH = "1"
-$env:WVAB_UDP_TOKEN = "change-me"
-$env:WVAB_UDP_HEALTH_PATH = "wvab_udp_client_health.json"
-python udp_streaming.py client --server-ip 192.168.4.1 --server-port 9999 --camera 0 --auto-restart
+The test suite covers configuration validation, proximity semantics, calibrated-distance math, Unicode font selection, missing-depth handling, fail-safe state output, occupancy-grid behavior, and A* obstacle avoidance.
+
+Full runtime smoke import is opt-in because it requires heavyweight ML/device dependencies:
+
+```bash
+WVAB_FULL_SMOKE=1 python -m pytest tests/test_smoke.py -q
 ```
 
-WebSocket control (default port 8765):
-```json
-{"cmd":"set_language","value":"bn"}
-{"cmd":"set_all_objects","value":true}
-{"cmd":"set_confidence","value":0.4}
-```
+GitHub Actions runs core tests on Python 3.10, 3.11, and 3.12 and rejects tracked cache/build/log artifacts.
 
-## Troubleshooting
-- `name 'np' is not defined`: update to latest `camera_gui.py`.
-- First voice only / no second voice: use latest code (speech queue fixes already included).
-- RU text shows but RU speech not correct: install RU speech pack on device.
-- `cmake not recognized`: install CMake and add to PATH.
-- Unicode text in frame not rendering: use latest GUI/server code (Unicode overlay support added).
-- BN/HI/AR speech not available: run `install_tts_voice_packs.ps1` as Administrator, then `enable_onecore_voices.ps1`, and reboot.
-- Depth unavailable: set `WVAB_MIDAS_WEIGHTS` and run `training\depth_diag.py`.
+## Repository hygiene
 
-## Notes for Deployment
-- For blind-user safety, prioritize audio reliability:
-  - keep language packs installed on target device
-  - test with `test_system.py` before field use
-  - keep model and labels file synced
+Generated Python caches, CMake/Visual Studio build output, runtime logs, health files, local datasets, and derived export files are ignored. The currently vendored YOLO and MiDaS weights are retained intentionally to preserve the existing offline demo path; new/derived weights should be distributed as versioned release artifacts instead of being committed directly.
+
+## Production-readiness gates
+
+Before describing a build as field-ready, record and publish evidence for at least:
+
+- 8+ hour soak testing without unbounded memory growth
+- camera/network/TTS dropout recovery
+- authenticated/encrypted transport validation
+- model accuracy on representative mobility hazards
+- calibrated distance/depth error statistics where metric claims are made
+- end-to-end latency distribution, not only best-case latency
+- localization drift and path-planning failure rate
+- battery/thermal behavior on the target edge device
+- blind/low-vision user evaluation under an approved study protocol
+
+See `PRODUCTION_READINESS.md` for the release gate checklist.
 
 ## License
-This project is licensed under the MIT License. See `LICENSE`.
+
+MIT License. See `LICENSE`.
