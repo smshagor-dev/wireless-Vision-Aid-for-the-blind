@@ -11,8 +11,8 @@ def load_config(path):
         raise RuntimeError("PyYAML is required for config files. Install pyyaml.") from exc
     if not os.path.exists(path):
         raise FileNotFoundError(path)
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
+    with open(path, "r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
     if not isinstance(data, dict):
         raise RuntimeError("Config root must be a mapping.")
     return data
@@ -60,18 +60,31 @@ def validate_navigation_config(cfg: dict[str, Any]) -> dict[str, Any]:
     if missing:
         raise RuntimeError("Navigation config missing required keys: " + ", ".join(missing))
 
-    intr = _get_path(cfg, ("camera", "intrinsics"))
+    intrinsics = _get_path(cfg, ("camera", "intrinsics"))
     for key in ("fx", "fy"):
-        if float(intr[key]) <= 0:
+        if float(intrinsics[key]) <= 0:
             raise RuntimeError(f"camera.intrinsics.{key} must be > 0")
+
+    confidence = float(_get_path(cfg, ("perception", "confidence")))
+    if not 0.0 < confidence <= 1.0:
+        raise RuntimeError("perception.confidence must be in (0, 1]")
 
     depth_cfg = _get_path(cfg, ("perception", "depth"))
     if bool(depth_cfg.get("metric_calibrated", False)):
         scale = depth_cfg.get("scale_m")
         if scale is None or float(scale) <= 0:
             raise RuntimeError("perception.depth.scale_m must be > 0 when metric_calibrated=true")
+        if not bool(intrinsics.get("calibrated", False)):
+            raise RuntimeError(
+                "camera.intrinsics.calibrated must be true when perception.depth.metric_calibrated=true"
+            )
 
     fallback = _get_path(cfg, ("navigation", "fallback_goal_relative"))
     if not isinstance(fallback, (list, tuple)) or len(fallback) != 2:
         raise RuntimeError("navigation.fallback_goal_relative must contain [x, y]")
+
+    grid_cfg = _get_path(cfg, ("mapping", "occupancy_grid"))
+    for key in ("width_m", "height_m", "resolution"):
+        if float(grid_cfg[key]) <= 0:
+            raise RuntimeError(f"mapping.occupancy_grid.{key} must be > 0")
     return cfg
