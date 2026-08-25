@@ -1,35 +1,31 @@
-# --------------------------------------------------------------------------------------------- # 
-# | Name: Md. Shahanur Islam Shagor                                                           | # 
-# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
-# | Voronezh State University of Forestry and Technologies                                    | # 
-# | Build for Blind people within 15$                                                         | # 
-# --------------------------------------------------------------------------------------------- # 
+# Runtime dependencies are bounded to compatible major versions.
+# CI uses requirements-ci.txt for deterministic lightweight validation.
 
 # Computer Vision and Machine Learning
-opencv-python
-opencv-contrib-python
-ultralytics
-torch
-torchvision
-numpy
+opencv-python>=4.8,<5
+opencv-contrib-python>=4.8,<5
+ultralytics>=8.2,<9
+torch>=2.2,<3
+torchvision>=0.17,<1
+numpy>=1.24,<3
 
 # Text-to-Speech
-pyttsx3
+pyttsx3>=2.90,<3
 
 # Network and HTTP
-urllib3
-requests
+urllib3>=2.2,<3
+requests>=2.31,<3
 
 # Utilities
-Pillow
-pyyaml
-psutil
+Pillow>=10,<12
+PyYAML>=6,<7
+psutil>=5.9,<8
 
 # Security / Realtime Control
-pycryptodome
-websockets
-paho-mqtt
+pycryptodome>=3.20,<4
+websockets>=12,<16
+paho-mqtt>=2,<3
 
-# Accelerated Inference (Intel)
-openvino
-prometheus-client
+# Accelerated Inference / Metrics
+openvino>=2024,<2027
+prometheus-client>=0.20,<1

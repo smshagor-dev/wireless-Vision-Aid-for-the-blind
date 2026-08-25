@@ -1,9 +1,30 @@
-# --------------------------------------------------------------------------------------------- # 
-# | Name: Md. Shahanur Islam Shagor                                                           | # 
-# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
-# | Voronezh State University of Forestry and Technologies                                    | # 
-# | Build for Blind people within 15$                                                         | # 
-# --------------------------------------------------------------------------------------------- # 
+system:
+  log_dir: logs
+  log_level: INFO
+
+camera:
+  source: 0
+  width: 640
+  height: 480
+  fps: 30
+  intrinsics:
+    # Replace these nominal values with a real camera calibration before
+    # claiming metric geometry or field-ready navigation.
+    fx: 600.0
+    fy: 600.0
+    cx: 320.0
+    cy: 240.0
+    calibrated: false
+
+perception:
+  yolo_model: yolov8n.pt
+  confidence: 0.50
+  depth:
+    backend: MiDaS_small
+    # MiDaS monocular output is scale-ambiguous. Keep false until an external
+    # calibration establishes a real scale for the deployed camera/setup.
+    metric_calibrated: false
+    scale_m: null
 
 mapping:
   occupancy_grid:
@@ -13,7 +34,9 @@ mapping:
     origin_x: -10.0
     origin_y: -10.0
   slam:
-    backend: orbslam3
+    # VO is the portable default. ORB-SLAM3 can be enabled explicitly.
+    backend: vo
+    metric_scale_calibrated: false
     command:
       - ./ORB_SLAM3
       - Mono
@@ -32,4 +55,4 @@ navigation:
   goal_source: file
   goal_file: config/goal.json
   fallback_goal_relative: [5.0, 0.0]
-  goal_distance_m: 5.0
+  safety_state_file: navigation_state.json
