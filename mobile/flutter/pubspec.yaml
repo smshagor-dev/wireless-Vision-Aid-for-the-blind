@@ -17,6 +17,14 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  android: true
+  image_path: ".generated/wvab_launcher.png"
+  min_sdk_android: 24
+  adaptive_icon_background: "#07112F"
+  adaptive_icon_foreground: ".generated/wvab_launcher_foreground.png"
 
 flutter:
   uses-material-design: true
