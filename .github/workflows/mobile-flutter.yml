@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - mobile-demo-build
     paths:
       - mobile/flutter/**
       - .github/workflows/mobile-flutter.yml
@@ -15,7 +14,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: mobile-flutter-${{ github.workflow }}-${{ github.ref }}
@@ -82,35 +81,3 @@ jobs:
           path: mobile/flutter/build/app/outputs/flutter-apk/*-debug.apk
           if-no-files-found: error
           retention-days: 7
-
-      - name: Publish arm64 demo APK to branch
-        if: github.event_name == 'push' && github.ref == 'refs/heads/mobile-demo-build'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p demo
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk demo/wvab-mobile-demo-arm64-v8a.apk
-          sha256sum demo/wvab-mobile-demo-arm64-v8a.apk | sed 's#  demo/#  #' > demo/SHA256SUMS.txt
-          cat > demo/README.md <<'EOF'
-          # WVAB Mobile Demo APK
-
-          `wvab-mobile-demo-arm64-v8a.apk` is the CI-built Android debug demo for 64-bit ARM devices.
-
-          - Build type: Flutter debug APK
-          - ABI: arm64-v8a
-          - Minimum Android SDK: 24
-          - Source: this repository's `mobile/flutter/` project
-          - Validation: `flutter analyze`, Flutter tests, Android host contract checks, and APK build must all pass before this file is published.
-
-          Verify the APK against `SHA256SUMS.txt` after download.
-
-          This is an assistive research prototype. It is not a certified navigation or safety device.
-          EOF
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add demo/wvab-mobile-demo-arm64-v8a.apk demo/SHA256SUMS.txt demo/README.md
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git commit -m "Add CI-built mobile demo APK [skip ci]"
-          git push origin HEAD:mobile-demo-build
