@@ -19,12 +19,16 @@ class _DetectionSettingsScreenState extends State<DetectionSettingsScreen> {
 
   static const _classKeys = <String>[
     'person',
-    'vehicle',
+    'car',
+    'truck',
+    'bus',
     'bicycle',
     'motorcycle',
-    'obstacle',
-    'stairs',
-    'curb',
+    'traffic light',
+    'stop sign',
+    'chair',
+    'bench',
+    'potted plant',
   ];
 
   @override
@@ -42,12 +46,15 @@ class _DetectionSettingsScreenState extends State<DetectionSettingsScreen> {
       ),
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(widget.controller.strings.get('saveChanges'))));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(widget.controller.strings.get('saveChanges'))),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final strings = widget.controller.strings;
+    final standalone = widget.controller.standaloneStrings;
     return Scaffold(
       appBar: AppBar(title: Text(strings.get('detectionSettings'))),
       body: ListView(
@@ -92,16 +99,16 @@ class _DetectionSettingsScreenState extends State<DetectionSettingsScreen> {
                   child: Slider(
                     value: _confidence,
                     min: 0.1,
-                    max: 1.0,
-                    divisions: 18,
+                    max: 0.95,
+                    divisions: 17,
                     onChanged: (value) => setState(() => _confidence = value),
                   ),
                 ),
                 const Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('0.1', style: TextStyle(color: AppTheme.muted, fontWeight: FontWeight.w600)),
-                    Text('1.0', style: TextStyle(color: AppTheme.muted, fontWeight: FontWeight.w600)),
+                    Text('0.10', style: TextStyle(color: AppTheme.muted, fontWeight: FontWeight.w600)),
+                    Text('0.95', style: TextStyle(color: AppTheme.muted, fontWeight: FontWeight.w600)),
                   ],
                 ),
               ],
@@ -121,7 +128,7 @@ class _DetectionSettingsScreenState extends State<DetectionSettingsScreen> {
                     CheckboxListTile(
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 1),
                       value: _classes.contains(key),
-                      title: Text(strings.get(key), style: const TextStyle(fontWeight: FontWeight.w700)),
+                      title: Text(standalone.get(key), style: const TextStyle(fontWeight: FontWeight.w700)),
                       activeColor: AppTheme.blue,
                       controlAffinity: ListTileControlAffinity.trailing,
                       secondary: Container(
@@ -181,15 +188,14 @@ class _Panel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(UiMetrics.cardRadius),
-        border: Border.all(color: AppTheme.border),
-        boxShadow: const [BoxShadow(color: Color(0x08000000), blurRadius: 10, offset: Offset(0, 3))],
+        side: const BorderSide(color: AppTheme.border),
       ),
-      child: child,
+      child: Padding(padding: padding, child: child),
     );
   }
 }
