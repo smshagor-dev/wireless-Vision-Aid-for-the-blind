@@ -1,0 +1,65 @@
+name: SLSA source provenance
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build-subject:
+    runs-on: ubuntu-latest
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create source artifact
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref_name="${GITHUB_REF_NAME:-manual-${GITHUB_SHA::12}}"
+          artifact="wvab-source-${ref_name}.tar.gz"
+          git archive --format=tar.gz --output "$artifact" HEAD
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+
+      - name: Generate provenance subjects
+        id: hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="${{ steps.package.outputs.artifact }}"
+          echo "hashes=$(sha256sum "$artifact" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload source artifact to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" "${{ steps.package.outputs.artifact }}" --clobber
+
+      - name: Preserve manual-run source artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wvab-source
+          path: ${{ steps.package.outputs.artifact }}
+          if-no-files-found: error
+
+  provenance:
+    needs: [build-subject]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.build-subject.outputs.hashes }}
+      upload-assets: ${{ github.event_name == 'release' }}
