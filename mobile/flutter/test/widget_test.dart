@@ -100,10 +100,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('settings-list')), findsOneWidget);
-    expect(find.byKey(const Key('settings-save-button')), findsOneWidget);
     expect(
       tester.getSize(find.byKey(const Key('settings-bottom-nav'))).height,
       UiMetrics.settingsBottomBarHeight,
     );
+
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('settings-save-button')),
+      300,
+      scrollable: find.byKey(const Key('settings-list')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('settings-save-button')), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }
