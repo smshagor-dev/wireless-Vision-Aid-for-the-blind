@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/controllers/app_controller.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/theme/ui_metrics.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key, required this.controller});
@@ -141,12 +142,19 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     return Scaffold(
       backgroundColor: AppTheme.navy,
       appBar: AppBar(
+        titleSpacing: 4,
         title: Text(strings.get('assistance')),
         actions: [
-          IconButton(onPressed: _toggleTorch, icon: Icon(_torchOn ? Icons.flash_on : Icons.flashlight_on_outlined)),
+          IconButton(
+            tooltip: strings.get('torch'),
+            onPressed: _toggleTorch,
+            icon: Icon(_torchOn ? Icons.flash_on_rounded : Icons.flashlight_on_outlined),
+          ),
+          const SizedBox(width: 6),
         ],
       ),
       body: SafeArea(
+        top: false,
         child: Column(
           children: [
             Expanded(
@@ -155,15 +163,23 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                 fit: StackFit.expand,
                 children: [
                   Container(
+                    key: const Key('assistance-camera-stage'),
                     color: Colors.black,
                     alignment: Alignment.center,
                     child: _initializing
                         ? Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const CircularProgressIndicator(color: Colors.white),
+                              const SizedBox(
+                                width: 34,
+                                height: 34,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+                              ),
                               const SizedBox(height: 14),
-                              Text(strings.get('cameraStarting'), style: const TextStyle(color: Colors.white)),
+                              Text(
+                                strings.get('cameraStarting'),
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                              ),
                             ],
                           )
                         : _error != null
@@ -174,10 +190,15 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                                   children: [
                                     const Icon(Icons.videocam_off_outlined, color: Colors.white, size: 52),
                                     const SizedBox(height: 14),
-                                    Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 18)),
+                                    Text(
+                                      _error!,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+                                    ),
                                     const SizedBox(height: 18),
                                     OutlinedButton(
                                       onPressed: _initializeCamera,
+                                      style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
                                       child: Text(strings.get('restartCamera')),
                                     ),
                                   ],
@@ -195,9 +216,40 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                     top: 12,
                     right: 12,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
-                      child: const Text('FPS: —', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                      key: const Key('assistance-fps-badge'),
+                      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: const Color(0xB20A1022),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                      ),
+                      child: const Text(
+                        'FPS: —',
+                        style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 12,
+                    bottom: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: const Color(0xB20A1022),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const ContainerDot(),
+                          const SizedBox(width: 7),
+                          Text(
+                            strings.get('notConnected'),
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -206,41 +258,54 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
             Expanded(
               flex: 5,
               child: Container(
+                key: const Key('assistance-control-panel'),
                 width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
                 decoration: const BoxDecoration(
-                  color: Color(0xFF07112F),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                  color: AppTheme.navy,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
                 ),
                 child: Column(
                   children: [
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 14),
                       decoration: BoxDecoration(
                         color: const Color(0xFF160C18),
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(UiMetrics.cardRadius),
                         border: Border.all(color: const Color(0xFF441525)),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.shield_outlined, color: Color(0xFFFF5252), size: 30),
+                          const Icon(Icons.shield_outlined, color: Color(0xFFFF5252), size: 28),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
                               strings.get('inferencePending'),
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, height: 1.3),
+                              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700, height: 1.3),
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 12),
                     Row(
                       children: [
-                        Expanded(child: _InfoChip(icon: Icons.dns_outlined, label: strings.get('mode'), value: strings.get('edgeServer'))),
+                        Expanded(
+                          child: _InfoChip(
+                            icon: Icons.dns_outlined,
+                            label: strings.get('mode'),
+                            value: strings.get('edgeServer'),
+                          ),
+                        ),
                         const SizedBox(width: 10),
-                        Expanded(child: _InfoChip(icon: Icons.speed_rounded, label: strings.get('speed'), value: strings.get('normal'))),
+                        Expanded(
+                          child: _InfoChip(
+                            icon: Icons.speed_rounded,
+                            label: strings.get('speed'),
+                            value: strings.get('normal'),
+                          ),
+                        ),
                       ],
                     ),
                     const Spacer(),
@@ -248,7 +313,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
                         _RoundAction(
-                          icon: _paused ? Icons.play_arrow_rounded : Icons.volume_up_rounded,
+                          icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
                           label: _paused ? strings.get('resume') : strings.get('pause'),
                           onTap: _togglePause,
                         ),
@@ -256,11 +321,13 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                           icon: Icons.stop_rounded,
                           label: strings.get('stop'),
                           fill: AppTheme.red,
+                          border: const Color(0xFFFF5A61),
                           onTap: () => Navigator.of(context).pop(),
                         ),
                         _RoundAction(
-                          icon: _torchOn ? Icons.flash_on : Icons.flashlight_on_outlined,
+                          icon: _torchOn ? Icons.flash_on_rounded : Icons.flashlight_on_outlined,
                           label: strings.get('torch'),
+                          active: _torchOn,
                           onTap: _toggleTorch,
                         ),
                       ],
@@ -276,6 +343,19 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }
 }
 
+class ContainerDot extends StatelessWidget {
+  const ContainerDot({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: const BoxDecoration(color: AppTheme.red, shape: BoxShape.circle),
+    );
+  }
+}
+
 class _InfoChip extends StatelessWidget {
   const _InfoChip({required this.icon, required this.label, required this.value});
 
@@ -285,48 +365,82 @@ class _InfoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: const Color(0xFF38BDF8), size: 22),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: const TextStyle(color: Color(0xFF8EA2C9), fontSize: 12)),
-              Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-            ],
+    return Container(
+      minHeight: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0B1A3B),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF17315F)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: AppTheme.cyan, size: 21),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(color: Color(0xFF8EA2C9), fontSize: 11, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 1),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
 class _RoundAction extends StatelessWidget {
-  const _RoundAction({required this.icon, required this.label, required this.onTap, this.fill});
+  const _RoundAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.fill,
+    this.border,
+    this.active = false,
+  });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
   final Color? fill;
+  final Color? border;
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
+    final background = fill ?? (active ? const Color(0xFF114C70) : const Color(0xFF172443));
     return Column(
       children: [
         InkWell(
           customBorder: const CircleBorder(),
           onTap: onTap,
           child: Container(
-            width: 62,
-            height: 62,
-            decoration: BoxDecoration(color: fill ?? const Color(0xFF172443), shape: BoxShape.circle),
-            child: Icon(icon, color: Colors.white, size: 30),
+            width: UiMetrics.cameraActionDiameter,
+            height: UiMetrics.cameraActionDiameter,
+            decoration: BoxDecoration(
+              color: background,
+              shape: BoxShape.circle,
+              border: Border.all(color: border ?? const Color(0xFF26385E)),
+              boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 8, offset: Offset(0, 4))],
+            ),
+            child: Icon(icon, color: Colors.white, size: 29),
           ),
         ),
         const SizedBox(height: 7),
-        Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+        ),
       ],
     );
   }
