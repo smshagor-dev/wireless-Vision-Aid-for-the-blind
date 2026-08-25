@@ -22,6 +22,7 @@ import pyttsx3
 from PIL import Image, ImageDraw, ImageFont
 
 from core.font_paths import overlay_font_candidates
+from core.object_policy import CriticalObjectPolicy, label_candidates
 from core.proximity import classify_bbox_proximity
 from offline_utils import configure_offline_env, ensure_local_model
 
@@ -85,20 +86,7 @@ class VisionAidServer:
         self.last_announcement = {}
         self.running = False
 
-        self.priority = {
-            "person": 2,
-            "car": 1,
-            "truck": 1,
-            "bus": 1,
-            "motorcycle": 1,
-            "bicycle": 2,
-            "stairs": 1,
-            "chair": 3,
-            "bench": 3,
-            "stop sign": 4,
-            "traffic light": 4,
-            "door": 4,
-        }
+        self.priority = CriticalObjectPolicy()
 
         if enable_tts is None:
             enable_tts = _bool_env("WVAB_TTS", "1")
@@ -154,10 +142,11 @@ class VisionAidServer:
             self.overlay_font = self._load_overlay_font()
 
     def _translate(self, class_name):
-        entry = self.multilingual_labels.get(class_name)
-        if isinstance(entry, dict):
-            return entry.get(self.language, entry.get("en", class_name))
-        return class_name.replace("_", " ")
+        for candidate in label_candidates(class_name):
+            entry = self.multilingual_labels.get(candidate)
+            if isinstance(entry, dict):
+                return entry.get(self.language, entry.get("en", candidate.replace("_", " ")))
+        return str(class_name or "object").replace("_", " ")
 
     def _phrase(self, key):
         phrases = self.multilingual_labels.get("__phrases__", {})
@@ -193,7 +182,15 @@ class VisionAidServer:
     def _draw_text(self, frame, text, x, y, color_bgr):
         if self.overlay_font is None:
             ascii_text = text.encode("ascii", "ignore").decode("ascii") or "object"
-            cv2.putText(frame, ascii_text, (max(2, x), max(15, y)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color_bgr, 2)
+            cv2.putText(
+                frame,
+                ascii_text,
+                (max(2, x), max(15, y)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                color_bgr,
+                2,
+            )
             return frame
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         image = Image.fromarray(rgb)
@@ -280,7 +277,10 @@ class VisionAidServer:
             danger = item["proximity"] in {"immediate", "close"}
             color = (0, 0, 255) if danger else (0, 255, 0)
             cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
-            label = f"{item['label']} {item['confidence']:.2f} ({item['direction']}, {item['proximity']})"
+            label = (
+                f"{item['label']} {item['confidence']:.2f} "
+                f"({item['direction']}, {item['proximity']})"
+            )
             frame = self._draw_text(frame, label, bbox[0], bbox[1] - 20, color)
         return frame
 
@@ -380,11 +380,19 @@ class VisionAidServer:
 
 def main():
     parser = argparse.ArgumentParser(description="Run WVAB on a local or trusted IP camera source")
-    parser.add_argument("--camera", default=os.environ.get("WVAB_CAMERA", "0"), help="Camera index or trusted local stream URL")
+    parser.add_argument(
+        "--camera",
+        default=os.environ.get("WVAB_CAMERA", "0"),
+        help="Camera index or trusted local stream URL",
+    )
     parser.add_argument("--model", default=os.environ.get("WVAB_MODEL", "yolov8n.pt"))
     parser.add_argument("--language", default=os.environ.get("WVAB_LANGUAGE", "en"))
     parser.add_argument("--labels", default="multilingual_labels.common.json")
-    parser.add_argument("--confidence", type=float, default=float(os.environ.get("WVAB_CONFIDENCE", "0.5")))
+    parser.add_argument(
+        "--confidence",
+        type=float,
+        default=float(os.environ.get("WVAB_CONFIDENCE", "0.5")),
+    )
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--no-tts", action="store_true")
     args = parser.parse_args()
