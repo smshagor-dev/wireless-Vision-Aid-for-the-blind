@@ -6,21 +6,28 @@ abstract class UdpReplayStore {
   Future<bool> recordIfFresh({required int sessionId, required int authCounter, required int nextFrameId});
 }
 
+void _validateReplayRecord({required int sessionId, required int authCounter, required int nextFrameId}) {
+  if (sessionId <= 0 || sessionId > 0xFFFFFFFF) throw const FormatException('Invalid WVAB session id.');
+  if (authCounter <= 0) throw const FormatException('Invalid WVAB auth counter.');
+  if (nextFrameId < 0 || nextFrameId > wvabUdpMaxDataFrameId) {
+    throw const FormatException('Invalid WVAB next frame id.');
+  }
+}
+
 class SharedPreferencesUdpReplayStore implements UdpReplayStore {
   SharedPreferencesUdpReplayStore({SharedPreferencesAsync? preferences, this.maxSessions = 512})
       : _preferences = preferences ?? SharedPreferencesAsync();
 
-  static const _orderKey = 'wvab.udp.replay.order';
-  static const _counterPrefix = 'wvab.udp.replay.counter.';
-  static const _nextPrefix = 'wvab.udp.replay.next.';
+  static const _prefix = 'wvab.udp.replay.';
+  static const _orderKey = '${_prefix}order';
+  static const _counterPrefix = '${_prefix}counter.';
+  static const _nextPrefix = '${_prefix}next.';
   final SharedPreferencesAsync _preferences;
   final int maxSessions;
 
   @override
   Future<bool> recordIfFresh({required int sessionId, required int authCounter, required int nextFrameId}) async {
-    if (sessionId <= 0 || sessionId > 0xFFFFFFFF) throw const FormatException('Invalid WVAB session id.');
-    if (authCounter <= 0) throw const FormatException('Invalid WVAB auth counter.');
-    if (nextFrameId < 0 || nextFrameId > wvabUdpMaxDataFrameId) throw const FormatException('Invalid WVAB next frame id.');
+    _validateReplayRecord(sessionId: sessionId, authCounter: authCounter, nextFrameId: nextFrameId);
 
     final id = sessionId.toString();
     final existing = await _preferences.getString('$_counterPrefix$id');
@@ -50,6 +57,7 @@ class MemoryUdpReplayStore implements UdpReplayStore {
 
   @override
   Future<bool> recordIfFresh({required int sessionId, required int authCounter, required int nextFrameId}) async {
+    _validateReplayRecord(sessionId: sessionId, authCounter: authCounter, nextFrameId: nextFrameId);
     final previous = _counters[sessionId];
     if (previous != null && authCounter <= previous) return false;
     _counters[sessionId] = authCounter;
