@@ -82,9 +82,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            const Semantics(
+            Semantics(
               headingLevel: 1,
-              child: Text('Feedback', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+              child: const Text('Feedback', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
@@ -110,9 +110,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (value) => setState(() => _vibrationEnabled = value),
             ),
             const SizedBox(height: 24),
-            const Semantics(
+            Semantics(
               headingLevel: 2,
-              child: Text('Edge server', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+              child: const Text('Edge server', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
             ),
             const SizedBox(height: 12),
             TextField(
