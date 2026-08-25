@@ -1,0 +1,93 @@
+name: Package Release Gate
+
+on:
+  push:
+    branches:
+      - main
+      - v2.0.0-release-preparation
+    paths:
+      - setup.cfg
+      - pyproject.toml
+      - main.py
+      - assets/**
+      - core/**
+      - mapping/**
+      - navigation/**
+      - perception/**
+      - training/**
+      - tools/**
+      - .github/workflows/package-release.yml
+  pull_request:
+    paths:
+      - setup.cfg
+      - pyproject.toml
+      - main.py
+      - assets/**
+      - core/**
+      - mapping/**
+      - navigation/**
+      - perception/**
+      - training/**
+      - tools/**
+      - .github/workflows/package-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-release:
+    name: Build and validate v2.0.0 package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install packaging tools
+        run: python -m pip install --upgrade pip setuptools wheel build twine
+
+      - name: Build wheel and source distribution
+        run: python -m build
+
+      - name: Validate package metadata
+        run: python -m twine check dist/*
+
+      - name: Verify v2.0.0 artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/wvab_system-2.0.0-py3-none-any.whl
+          test -f dist/wvab_system-2.0.0.tar.gz
+
+      - name: Install release wheel
+        run: python -m pip install --no-deps --force-reinstall dist/wvab_system-2.0.0-py3-none-any.whl
+
+      - name: Validate installed metadata and resources outside checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d)"
+          cd "$tmpdir"
+          python - <<'PY'
+          from importlib.metadata import metadata, version
+          from importlib.resources import files
+          import main
+
+          assert version("wvab-system") == "2.0.0"
+          package_metadata = metadata("wvab-system")
+          assert package_metadata["Name"] == "wvab-system"
+          assert package_metadata["Requires-Python"] == ">=3.10"
+          assert callable(main.main)
+          assert files("assets").joinpath("fonts/NotoSansBengali-Regular.ttf").is_file()
+          PY
+          wvab --help >/dev/null
