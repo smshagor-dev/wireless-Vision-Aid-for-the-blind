@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Authenticated, encrypted, replay-aware low-latency WVAB UDP transport."""
+"""Secure, replay-aware low-latency UDP camera transport for WVAB."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import base64
+import hmac
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -42,7 +43,6 @@ from core.udp_protocol import (
 from offline_utils import configure_offline_env, ensure_local_model
 
 OFFLINE_MODE = configure_offline_env()
-from ultralytics import YOLO
 
 try:
     from Crypto.Cipher import AES
@@ -55,18 +55,18 @@ except Exception:
 FRAME_BUFFER_TIMEOUT_S = 2.0
 HEALTH_INTERVAL_DEFAULT_S = 5.0
 WATCHDOG_CHECK_DEFAULT_S = 2.0
-WATCHDOG_SERVER_IDLE_DEFAULT_S = 30.0
-WATCHDOG_CLIENT_IDLE_DEFAULT_S = 15.0
+WATCHDOG_SERVER_FRAME_IDLE_DEFAULT_S = 30.0
+WATCHDOG_CLIENT_SEND_IDLE_DEFAULT_S = 15.0
 TRACK_IOU_DEFAULT = 0.3
 TRACK_MAX_AGE_S_DEFAULT = 1.0
 TRACK_MIN_HITS_DEFAULT = 1
 
 
-def _bool_env(name, default="0"):
+def _bool_env(name: str, default: str = "0") -> bool:
     return str(os.environ.get(name, default)).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _validate_aes_key(key_bytes):
+def _validate_aes_key(key_bytes: bytes | None) -> bytes | None:
     if key_bytes is None:
         return None
     if len(key_bytes) not in (16, 24, 32):
@@ -74,7 +74,7 @@ def _validate_aes_key(key_bytes):
     return key_bytes
 
 
-def _load_udp_key():
+def _load_udp_key() -> bytes | None:
     key_b64 = os.environ.get("WVAB_UDP_KEY_B64", "").strip()
     key_hex = os.environ.get("WVAB_UDP_KEY_HEX", "").strip()
     if key_b64:
@@ -90,33 +90,35 @@ def _load_udp_key():
     return None
 
 
-def _derive_nonce(base_nonce, chunk_index):
-    if base_nonce is None or len(base_nonce) != NONCE_SIZE:
-        return None
+def _derive_nonce(base_nonce: bytes, chunk_index: int) -> bytes:
+    if len(base_nonce) != NONCE_SIZE:
+        raise ValueError("invalid base nonce length")
     nonce = bytearray(base_nonce)
     counter = int.from_bytes(nonce[8:12], "big")
     nonce[8:12] = ((counter + int(chunk_index)) & 0xFFFFFFFF).to_bytes(4, "big")
     return bytes(nonce)
 
 
-def _require_secure_transport():
+def _secure_transport_settings():
     encrypt = _bool_env("WVAB_UDP_ENCRYPT", "1")
+    require_auth = _bool_env("WVAB_UDP_AUTH", "1")
     allow_insecure = _bool_env("WVAB_ALLOW_INSECURE_UDP", "0")
-    if not encrypt and not allow_insecure:
+    if (not encrypt or not require_auth) and not allow_insecure:
         raise RuntimeError(
-            "unencrypted UDP is disabled by default; set WVAB_ALLOW_INSECURE_UDP=1 only for isolated development"
+            "authentication and encryption are required; set WVAB_ALLOW_INSECURE_UDP=1 only for isolated development"
         )
+
     key = _validate_aes_key(_load_udp_key()) if encrypt else None
     if encrypt and (AES is None or get_random_bytes is None or key is None):
-        raise RuntimeError("UDP encryption is enabled but PyCryptodome or a valid AES key is unavailable")
-    require_auth = _bool_env("WVAB_UDP_AUTH", "1")
+        raise RuntimeError("UDP encryption requires PyCryptodome and a valid 16/24/32-byte AES key")
+
     token = os.environ.get("WVAB_UDP_TOKEN", "").strip()
     if require_auth and len(token) < 16:
-        raise RuntimeError("WVAB_UDP_TOKEN must contain at least 16 characters when authentication is enabled")
+        raise RuntimeError("WVAB_UDP_TOKEN must contain at least 16 characters")
     return encrypt, key, require_auth, token
 
 
-def _setup_logger(log_path=None, level=None):
+def _setup_logger(log_path: str | None = None, level: str | None = None):
     log_path = log_path or os.environ.get("WVAB_UDP_LOG_PATH", "wvab_udp.log")
     level = (level or os.environ.get("WVAB_LOG_LEVEL", "INFO")).upper()
     logger = logging.getLogger("wvab_udp")
@@ -133,20 +135,69 @@ def _setup_logger(log_path=None, level=None):
     return logger
 
 
-def _load_overlay_font(language=None, logger=None):
+def _write_health(path: str | None, payload: dict, logger) -> None:
+    if not path:
+        return
+    tmp_path = path + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
+        os.replace(tmp_path, path)
+    except Exception as exc:
+        logger.debug("Health write failed: %s", exc)
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def _load_config(path: str | None) -> dict:
+    if not path:
+        return {}
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise RuntimeError("Config root must be an object")
+    return data
+
+
+def _apply_config_env(config: dict, mode: str) -> None:
+    for source in (config.get("env", {}), config.get(f"{mode}_env", {})):
+        if not isinstance(source, dict):
+            continue
+        for key, value in source.items():
+            if key not in os.environ and value is not None:
+                os.environ[key] = str(value)
+
+
+def _apply_config_args(args, defaults: dict, config: dict, mode: str):
+    section = config.get(mode, {})
+    if not isinstance(section, dict):
+        return args
+    for key, value in section.items():
+        if value is not None and hasattr(args, key) and getattr(args, key) == defaults.get(key):
+            setattr(args, key, value)
+    return args
+
+
+def _load_overlay_font(language: str, logger):
     env_path = os.environ.get("WVAB_FONT_PATH", "").strip() or None
     for path in overlay_font_candidates(language, env_path):
         if not os.path.exists(path):
             continue
         try:
             font = ImageFont.truetype(path, 18)
-            if logger:
-                logger.info("Overlay font loaded: %s", path)
+            logger.info("Overlay font loaded: %s", path)
             return font
         except Exception:
             continue
-    if logger:
-        logger.warning("Unicode overlay font not found; using PIL default font")
+    logger.warning("Unicode overlay font unavailable; using PIL default")
     try:
         return ImageFont.load_default()
     except Exception:
@@ -157,72 +208,37 @@ def _draw_unicode_text(frame, text, x, y, color_bgr, font):
     text = str(text or "object").strip() or "object"
     x = int(max(x, 2))
     y = int(max(y, 12))
-    bg_w = min(max(frame.shape[1] - x - 2, 1), max(60, len(text) * 10))
-    cv2.rectangle(frame, (x - 2, y - 14), (x + bg_w, y + 4), (0, 0, 0), -1)
     if font is None:
-        safe = text if text.isascii() else "object"
-        cv2.putText(frame, safe, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_bgr, 2)
+        cv2.putText(
+            frame,
+            text if text.isascii() else "object",
+            (x, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            color_bgr,
+            2,
+        )
         return frame
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     image = Image.fromarray(rgb)
     draw = ImageDraw.Draw(image)
     draw.text((x, y), text, font=font, fill=(int(color_bgr[2]), int(color_bgr[1]), int(color_bgr[0])))
-    return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    return cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
 
 
-def _write_health(path, payload, logger):
-    if not path:
-        return
-    try:
-        tmp_path = path + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False)
-        os.replace(tmp_path, path)
-    except Exception as exc:
-        logger.debug("Health write failed: %s", exc)
-
-
-def _load_config(path):
-    if not path:
-        return {}
-    with open(path, "r", encoding="utf-8") as handle:
-        data = json.load(handle)
-    if not isinstance(data, dict):
-        raise RuntimeError("Config root must be an object")
-    return data
-
-
-def _apply_config_env(config, mode):
-    for source in (config.get("env", {}), config.get(f"{mode}_env", {})):
-        if isinstance(source, dict):
-            for key, value in source.items():
-                if key not in os.environ and value is not None:
-                    os.environ[key] = str(value)
-
-
-def _apply_config_args(args, defaults, config, mode):
-    section = config.get(mode, {})
-    if not isinstance(section, dict):
-        return args
-    for key, value in section.items():
-        if value is not None and hasattr(args, key) and getattr(args, key) == defaults.get(key):
-            setattr(args, key, value)
-    return args
-
-
-def _iou(box_a, box_b):
-    ax1, ay1, ax2, ay2 = box_a
-    bx1, by1, bx2, by2 = box_b
-    inter_x1, inter_y1 = max(ax1, bx1), max(ay1, by1)
-    inter_x2, inter_y2 = min(ax2, bx2), min(ay2, by2)
-    inter_w, inter_h = max(0.0, inter_x2 - inter_x1), max(0.0, inter_y2 - inter_y1)
-    inter = inter_w * inter_h
-    if inter <= 0:
+def _iou(box_a, box_b) -> float:
+    ax1, ay1, ax2, ay2 = [float(value) for value in box_a]
+    bx1, by1, bx2, by2 = [float(value) for value in box_b]
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+    intersection = iw * ih
+    if intersection <= 0:
         return 0.0
     area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
     area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
-    union = area_a + area_b - inter
-    return inter / union if union > 0 else 0.0
+    union = area_a + area_b - intersection
+    return intersection / union if union > 0 else 0.0
 
 
 class SimpleTracker:
@@ -238,16 +254,16 @@ class SimpleTracker:
         updated = {}
         used = set()
         for track_id, track in list(self.tracks.items()):
-            best_iou, best_idx = 0.0, None
-            for idx, detection in enumerate(detections):
-                if idx in used or detection["class_name"] != track["class_name"]:
+            best_score, best_index = 0.0, None
+            for index, detection in enumerate(detections):
+                if index in used or detection["class_name"] != track["class_name"]:
                     continue
-                score = _iou(detection["bbox"], track["bbox"])
-                if score > best_iou:
-                    best_iou, best_idx = score, idx
-            if best_idx is not None and best_iou >= self.iou_threshold:
-                detection = detections[best_idx]
-                used.add(best_idx)
+                score = _iou(track["bbox"], detection["bbox"])
+                if score > best_score:
+                    best_score, best_index = score, index
+            if best_index is not None and best_score >= self.iou_threshold:
+                detection = detections[best_index]
+                used.add(best_index)
                 updated[track_id] = {
                     "id": track_id,
                     "class_name": detection["class_name"],
@@ -257,8 +273,9 @@ class SimpleTracker:
                 }
             elif now - track["last_seen"] <= self.max_age_s:
                 updated[track_id] = track
-        for idx, detection in enumerate(detections):
-            if idx in used:
+
+        for index, detection in enumerate(detections):
+            if index in used:
                 continue
             track_id = self.next_id
             self.next_id += 1
@@ -283,43 +300,28 @@ class UDPVisionServer:
         labels_path="multilingual_labels.common.json",
         headless=False,
     ):
-        self.host = host
+        self.host = str(host)
         self.port = int(port)
         if not 1 <= self.port <= 65535:
             raise ValueError("UDP port must be in 1..65535")
+
         self.logger = _setup_logger()
-        self.encrypt_udp, self.udp_key, self.require_auth, self.auth_token = _require_secure_transport()
+        self.encrypt_udp, self.udp_key, self.require_auth, self.auth_token = _secure_transport_settings()
         self.auth_ttl_s = max(float(os.environ.get("WVAB_UDP_AUTH_TTL_S", "120")), 5.0)
         self.auth_ok = {}
         self.seen_auth_nonces = {}
         self.last_completed_frame = {}
 
+        from ultralytics import YOLO
+
         self.model = YOLO(ensure_local_model(model_path, offline=OFFLINE_MODE))
         self.language = (language or "en").strip().lower()
-        self.labels_path = labels_path
-        self.multilingual_labels = self._load_multilingual_labels(labels_path)
-        self.available_languages = self._detect_available_languages(self.multilingual_labels)
+        self.multilingual_labels = self._load_labels(labels_path)
+        self.available_languages = self._available_languages(self.multilingual_labels)
         if self.language not in self.available_languages:
             self.language = "en"
         self.overlay_font = _load_overlay_font(self.language, self.logger)
         self.headless = bool(headless or _bool_env("WVAB_UDP_HEADLESS", "0"))
-
-        self.enable_tracking = _bool_env("WVAB_UDP_TRACKING", "1")
-        self.tracker = (
-            SimpleTracker(
-                os.environ.get("WVAB_UDP_TRACK_IOU", TRACK_IOU_DEFAULT),
-                os.environ.get("WVAB_UDP_TRACK_MAX_AGE_S", TRACK_MAX_AGE_S_DEFAULT),
-                os.environ.get("WVAB_UDP_TRACK_MIN_HITS", TRACK_MIN_HITS_DEFAULT),
-            )
-            if self.enable_tracking
-            else None
-        )
-
-        self.health_path = os.environ.get("WVAB_UDP_HEALTH_PATH", "").strip() or None
-        self.health_interval_s = max(float(os.environ.get("WVAB_UDP_HEALTH_INTERVAL_S", HEALTH_INTERVAL_DEFAULT_S)), 0.5)
-        self.watchdog_server_idle_s = float(
-            os.environ.get("WVAB_UDP_WATCHDOG_SERVER_IDLE_S", WATCHDOG_SERVER_IDLE_DEFAULT_S)
-        )
 
         self.confidence_threshold = float(os.environ.get("WVAB_UDP_CONFIDENCE", "0.5"))
         if not 0.05 <= self.confidence_threshold <= 0.99:
@@ -338,14 +340,25 @@ class UDPVisionServer:
             "bench": 4,
             "potted plant": 4,
         }
-        self.last_announcement = {}
         self.announcement_cooldown = max(float(os.environ.get("WVAB_UDP_ANNOUNCE_COOLDOWN_S", "2.5")), 0.1)
+        self.last_announcement = {}
+
+        self.enable_tracking = _bool_env("WVAB_UDP_TRACKING", "1")
+        self.tracker = (
+            SimpleTracker(
+                os.environ.get("WVAB_UDP_TRACK_IOU", TRACK_IOU_DEFAULT),
+                os.environ.get("WVAB_UDP_TRACK_MAX_AGE_S", TRACK_MAX_AGE_S_DEFAULT),
+                os.environ.get("WVAB_UDP_TRACK_MIN_HITS", TRACK_MIN_HITS_DEFAULT),
+            )
+            if self.enable_tracking
+            else None
+        )
 
         self.enable_tts = _bool_env("WVAB_UDP_TTS", "1")
         self.tts_engine = None
-        self.speech_queue = queue.Queue(maxsize=1)
-        self.tts_stop_event = threading.Event()
         self.tts_thread = None
+        self.tts_stop = threading.Event()
+        self.speech_queue = queue.Queue(maxsize=1)
         self.speech_language = self.language
         if self.enable_tts:
             try:
@@ -359,24 +372,40 @@ class UDPVisionServer:
                 self.enable_tts = False
                 self.tts_engine = None
 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
-        self.frame_count = 0
-        self.fps = 0.0
-        self.latency = 0.0
-        self.last_packet_mono = time.monotonic()
-        self.last_frame_mono = time.monotonic()
+        self.health_path = os.environ.get("WVAB_UDP_HEALTH_PATH", "").strip() or None
+        self.health_interval_s = max(float(os.environ.get("WVAB_UDP_HEALTH_INTERVAL_S", HEALTH_INTERVAL_DEFAULT_S)), 0.5)
+        self.watchdog_server_frame_idle_s = float(
+            os.environ.get(
+                "WVAB_UDP_WATCHDOG_SERVER_FRAME_IDLE_S",
+                os.environ.get("WVAB_UDP_WATCHDOG_SERVER_IDLE_S", WATCHDOG_SERVER_FRAME_IDLE_DEFAULT_S),
+            )
+        )
 
         self.control_enabled = _bool_env("WVAB_WS_CONTROL", "1")
         self.control_host = normalize_control_host(os.environ.get("WVAB_WS_CONTROL_HOST"))
         self.control_port = int(os.environ.get("WVAB_WS_CONTROL_PORT", "8765"))
-        self.control_token = resolve_control_token(os.environ.get("WVAB_WS_TOKEN"), self.auth_token)
+        if not 1 <= self.control_port <= 65535:
+            raise ValueError("WebSocket control port must be in 1..65535")
+        dedicated_ws_token = os.environ.get("WVAB_WS_TOKEN", "").strip()
+        self.control_token = resolve_control_token(dedicated_ws_token, self.auth_token)
         if self.control_enabled and len(self.control_token or "") < 16:
             raise RuntimeError("WebSocket control requires a secret of at least 16 characters")
-        self._control_stop = threading.Event()
-        self._control_thread = None
+        if self.control_enabled and self.control_host not in {"127.0.0.1", "::1", "localhost"} and len(dedicated_ws_token) < 16:
+            raise RuntimeError("remote WebSocket control requires a dedicated WVAB_WS_TOKEN")
+        self.control_stop = threading.Event()
+        self.control_thread = None
 
-    def _load_multilingual_labels(self, path):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
+        now = time.monotonic()
+        self.started_mono = now
+        self.last_valid_packet_mono = now
+        self.last_frame_mono = now
+        self.frame_count = 0
+        self.fps = 0.0
+        self.latency_ms = 0.0
+
+    def _load_labels(self, path):
         if not path or not os.path.exists(path):
             return {}
         try:
@@ -388,7 +417,7 @@ class UDPVisionServer:
             return {}
 
     @staticmethod
-    def _detect_available_languages(labels):
+    def _available_languages(labels):
         languages = {"en"}
         if isinstance(labels, dict):
             for value in labels.values():
@@ -396,45 +425,49 @@ class UDPVisionServer:
                     languages.update(str(key).lower() for key in value if isinstance(key, str) and key.strip())
         return sorted(languages)
 
-    def _translate(self, class_name, lang=None):
+    def _translate(self, class_name, language=None):
+        language = language or self.language
         entry = self.multilingual_labels.get(class_name)
-        lang = lang or self.language
         if isinstance(entry, dict):
-            return entry.get(lang, entry.get("en", class_name))
+            return entry.get(language, entry.get("en", class_name))
         return class_name.replace("_", " ")
 
-    def _phrase(self, key, lang=None):
-        lang = lang or self.language
+    def _phrase(self, key, language=None):
+        language = language or self.language
         phrases = self.multilingual_labels.get("__phrases__", {})
         if isinstance(phrases, dict):
-            table = phrases.get(lang, {})
+            table = phrases.get(language, {})
             if isinstance(table, dict) and isinstance(table.get(key), str):
                 return table[key]
         return {"left": "left", "right": "right", "in front": "ahead", "close": "close"}.get(key, key)
 
-    def _detect_tts_languages(self):
+    def _installed_tts_languages(self):
         languages = {"en"}
-        if not self.tts_engine:
+        if self.tts_engine is None:
             return languages
         try:
             voices = self.tts_engine.getProperty("voices")
         except Exception:
             return languages
         for voice in voices:
-            for code in getattr(voice, "languages", []) or []:
-                raw = code.decode("utf-8", "ignore") if isinstance(code, bytes) else str(code)
-                raw = raw.lower()
-                for marker in ("bn", "hi", "ru", "en", "ar", "es", "fr"):
-                    if marker in raw:
-                        languages.add(marker)
+            text = " ".join(
+                [str(getattr(voice, "name", "")), str(getattr(voice, "id", ""))]
+                + [
+                    item.decode("utf-8", "ignore") if isinstance(item, bytes) else str(item)
+                    for item in (getattr(voice, "languages", []) or [])
+                ]
+            ).lower()
+            for code in ("bn", "hi", "ru", "en", "ar", "es", "fr"):
+                if code in text:
+                    languages.add(code)
         return languages
 
     def _resolve_speech_language(self, requested):
-        return requested if requested in self._detect_tts_languages() else "en"
+        return requested if requested in self._installed_tts_languages() else "en"
 
     def _tts_worker(self):
         stale_s = float(os.environ.get("WVAB_UDP_TTS_STALE_MS", "700")) / 1000.0
-        while not self.tts_stop_event.is_set():
+        while not self.tts_stop.is_set():
             try:
                 text, created = self.speech_queue.get(timeout=0.2)
             except queue.Empty:
@@ -447,7 +480,7 @@ class UDPVisionServer:
             except Exception:
                 self.logger.exception("TTS error")
 
-    def speak(self, text):
+    def _speak(self, text):
         if not self.enable_tts:
             return
         payload = (text, time.monotonic())
@@ -460,8 +493,8 @@ class UDPVisionServer:
             except Exception:
                 pass
 
-    def stop_tts(self):
-        self.tts_stop_event.set()
+    def _stop_tts(self):
+        self.tts_stop.set()
         if self.tts_thread and self.tts_thread.is_alive():
             self.tts_thread.join(timeout=1.0)
         if self.tts_engine is not None:
@@ -470,20 +503,20 @@ class UDPVisionServer:
             except Exception:
                 pass
 
-    def _is_authed(self, addr):
+    def _is_authed(self, addr) -> bool:
         if not self.require_auth:
             return True
-        authenticated = self.auth_ok.get(addr)
-        if authenticated is None:
+        authenticated_at = self.auth_ok.get(addr)
+        if authenticated_at is None:
             return False
-        if time.monotonic() - authenticated > self.auth_ttl_s:
+        if time.monotonic() - authenticated_at > self.auth_ttl_s:
             self.auth_ok.pop(addr, None)
             return False
         return True
 
-    def _handle_auth_packet(self, header, payload, addr):
+    def _handle_auth(self, header: bytes, payload: bytes, addr) -> bool:
         if not self.require_auth:
-            self.last_packet_mono = time.monotonic()
+            self.last_valid_packet_mono = time.monotonic()
             return True
         try:
             if self.encrypt_udp:
@@ -502,99 +535,131 @@ class UDPVisionServer:
                 token = payload.decode("utf-8", "strict").strip()
         except Exception:
             return False
+
         if not verify_secret(token, self.auth_token):
             return False
         now = time.monotonic()
         self.auth_ok[addr] = now
         if base_nonce is not None:
             self.seen_auth_nonces[base_nonce] = now
-        self.last_packet_mono = now
+        self.last_valid_packet_mono = now
         return True
 
-    def calculate_position(self, bbox, frame_shape):
-        center = (float(bbox[0]) + float(bbox[2])) * 0.5
-        width = float(frame_shape[1])
-        direction = "left" if center < width * 0.3 else "right" if center > width * 0.7 else "center"
-        return direction, classify_bbox_proximity(bbox, frame_shape)
-
-    def should_announce(self, key):
+    def _cleanup_security_state(self, frame_buffers):
         now = time.monotonic()
-        last = self.last_announcement.get(key)
-        if last is None or now - last > self.announcement_cooldown:
-            self.last_announcement[key] = now
-            return True
-        return False
+        for key in [key for key, value in frame_buffers.items() if now - value["created"] > FRAME_BUFFER_TIMEOUT_S]:
+            frame_buffers.pop(key, None)
+        for addr in [addr for addr, stamp in self.auth_ok.items() if now - stamp > self.auth_ttl_s]:
+            self.auth_ok.pop(addr, None)
+        for nonce in [nonce for nonce, stamp in self.seen_auth_nonces.items() if now - stamp > self.auth_ttl_s]:
+            self.seen_auth_nonces.pop(nonce, None)
 
-    def set_language(self, language):
+    @staticmethod
+    def _evict_excess_frames(frame_buffers, addr):
+        keys = [key for key in frame_buffers if key[0] == addr]
+        if len(keys) < MAX_INFLIGHT_FRAMES_PER_CLIENT:
+            return
+        oldest = min(keys, key=lambda key: frame_buffers[key]["created"])
+        frame_buffers.pop(oldest, None)
+
+    def _decrypt_chunk(self, header, payload, entry, chunk_index):
+        if not self.encrypt_udp:
+            return payload
+        if len(payload) <= NONCE_SIZE + TAG_SIZE:
+            raise ValueError("encrypted chunk is too short")
+        base_nonce = payload[:NONCE_SIZE]
+        tag = payload[NONCE_SIZE:NONCE_SIZE + TAG_SIZE]
+        ciphertext = payload[NONCE_SIZE + TAG_SIZE:]
+        if entry["base_nonce"] is None:
+            entry["base_nonce"] = base_nonce
+        elif not hmac.compare_digest(base_nonce, entry["base_nonce"]):
+            raise ValueError("frame chunks use inconsistent base nonces")
+        cipher = AES.new(self.udp_key, AES.MODE_GCM, nonce=_derive_nonce(base_nonce, chunk_index))
+        cipher.update(header)
+        return cipher.decrypt_and_verify(ciphertext, tag)
+
+    def _set_language(self, language):
         language = str(language or "").strip().lower()
         if language not in self.available_languages:
-            raise ValueError(f"unsupported language: {language}")
+            raise ValueError("unsupported language")
         self.language = language
         self.overlay_font = _load_overlay_font(language, self.logger)
         self.speech_language = self._resolve_speech_language(language) if self.enable_tts else language
 
-    def apply_control(self, command):
+    def _apply_control(self, command):
         if not isinstance(command, dict):
-            raise ValueError("command must be a JSON object")
+            raise ValueError("invalid command")
         if not verify_secret(command.get("token"), self.control_token):
-            raise PermissionError("unauthorized control command")
+            raise PermissionError("unauthorized")
         name = command.get("cmd")
         if name == "set_language":
-            self.set_language(command.get("value"))
+            self._set_language(command.get("value"))
         elif name == "set_all_objects":
             value = command.get("value")
             if not isinstance(value, bool):
-                raise ValueError("set_all_objects value must be a boolean")
+                raise ValueError("invalid boolean")
             self.all_objects = value
         elif name == "set_confidence":
             value = float(command.get("value"))
             if not 0.05 <= value <= 0.99:
-                raise ValueError("confidence must be between 0.05 and 0.99")
+                raise ValueError("invalid confidence")
             self.confidence_threshold = value
         elif name != "status":
-            raise ValueError(f"unsupported command: {name}")
+            raise ValueError("unsupported command")
         return {
             "ok": True,
             "language": self.language,
             "all_objects": self.all_objects,
             "confidence": self.confidence_threshold,
             "fps": self.fps,
-            "latency_ms": round(self.latency, 2),
+            "latency_ms": round(self.latency_ms, 2),
         }
 
     async def _control_handler(self, websocket):
         async for message in websocket:
             try:
-                response = self.apply_control(json.loads(message))
+                response = self._apply_control(json.loads(message))
             except Exception as exc:
                 response = {"ok": False, "error": type(exc).__name__}
             await websocket.send(json.dumps(response, ensure_ascii=False))
 
-    def _control_thread_main(self):
+    def _control_main(self):
         async def runner():
             try:
                 import websockets
             except Exception as exc:
                 self.logger.error("WebSocket control unavailable: %s", exc)
                 return
-            if self.control_host not in {"127.0.0.1", "::1", "localhost"}:
-                self.logger.warning("WebSocket control is bound remotely; use only behind a trusted/TLS boundary")
             async with websockets.serve(self._control_handler, self.control_host, self.control_port, max_size=8192):
                 self.logger.info("WebSocket control listening on %s:%s", self.control_host, self.control_port)
-                while not self._control_stop.is_set():
+                while not self.control_stop.is_set():
                     await asyncio.sleep(0.25)
-
         try:
             asyncio.run(runner())
         except Exception:
             self.logger.exception("WebSocket control stopped unexpectedly")
 
-    def start_control_server(self):
-        if self.control_enabled:
-            self._control_thread = threading.Thread(target=self._control_thread_main, daemon=True)
-            self._control_thread.start()
+    def _start_control(self):
+        if not self.control_enabled:
+            return
+        self.control_thread = threading.Thread(target=self._control_main, daemon=True)
+        self.control_thread.start()
 
-    def process_frame(self, frame):
+    def _direction_and_proximity(self, bbox, frame_shape):
+        center = (float(bbox[0]) + float(bbox[2])) * 0.5
+        width = float(frame_shape[1])
+        direction = "left" if center < width * 0.3 else "right" if center > width * 0.7 else "center"
+        return direction, classify_bbox_proximity(bbox, frame_shape)
+
+    def _should_announce(self, key):
+        now = time.monotonic()
+        previous = self.last_announcement.get(key)
+        if previous is None or now - previous >= self.announcement_cooldown:
+            self.last_announcement[key] = now
+            return True
+        return False
+
+    def _process_frame(self, frame):
         started = time.monotonic()
         results = self.model(frame, verbose=False)
         detections = []
@@ -609,69 +674,56 @@ class UDPVisionServer:
                     continue
                 detections.append({"class_name": class_name, "bbox": box.xyxy[0].cpu().numpy()})
 
-        tracks = (
-            self.tracker.update(detections)
-            if self.tracker
-            else [{"id": None, "class_name": item["class_name"], "bbox": item["bbox"], "hits": 1} for item in detections]
-        )
+        if self.tracker:
+            tracks = self.tracker.update(detections)
+        else:
+            tracks = [
+                {"id": None, "class_name": detection["class_name"], "bbox": detection["bbox"], "hits": 1}
+                for detection in detections
+            ]
+
         announcements = []
         for track in tracks:
             class_name = track["class_name"]
             bbox = track["bbox"]
-            direction, proximity = self.calculate_position(bbox, frame.shape)
-            priority = self.critical_objects.get(class_name, 5)
-            key = f"{class_name}_{direction}_{track.get('id')}"
-            spoken_name = self._translate(class_name, self.speech_language)
+            direction, proximity = self._direction_and_proximity(bbox, frame.shape)
             direction_key = "in front" if direction == "center" else direction
-            direction_text = self._phrase(direction_key, self.speech_language)
-            if self.should_announce(key):
+            spoken_name = self._translate(class_name, self.speech_language)
+            spoken_direction = self._phrase(direction_key, self.speech_language)
+            announcement_key = f"{class_name}:{direction}:{track.get('id')}"
+            if self._should_announce(announcement_key):
                 if proximity.label == "immediate":
-                    message = f"Warning {spoken_name} {direction_text}"
+                    message = f"Warning {spoken_name} {spoken_direction}"
                 elif proximity.label == "close":
-                    message = f"{spoken_name} {direction_text} {self._phrase('close', self.speech_language)}"
+                    message = f"{spoken_name} {spoken_direction} {self._phrase('close', self.speech_language)}"
                 else:
-                    message = f"{spoken_name} {direction_text}"
-                announcements.append((priority, message))
+                    message = f"{spoken_name} {spoken_direction}"
+                announcements.append((self.critical_objects.get(class_name, 5), message))
 
-            bbox_int = np.asarray(bbox).astype(int)
+            box = np.asarray(bbox).astype(int)
             color = (0, 0, 255) if proximity.label in {"immediate", "close"} else (0, 255, 0)
-            cv2.rectangle(frame, (bbox_int[0], bbox_int[1]), (bbox_int[2], bbox_int[3]), color, 2)
+            cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), color, 2)
             label = f"{self._translate(class_name)} {direction} {proximity.label}"
             if track.get("id") is not None:
                 label += f" #{track['id']}"
-            frame = _draw_unicode_text(frame, label, bbox_int[0], bbox_int[1] - 10, color, self.overlay_font)
+            frame = _draw_unicode_text(frame, label, box[0], box[1] - 10, color, self.overlay_font)
 
         if announcements:
             announcements.sort(key=lambda item: item[0])
-            self.speak(announcements[0][1])
-        self.latency = (time.monotonic() - started) * 1000.0
+            self._speak(announcements[0][1])
+        self.latency_ms = (time.monotonic() - started) * 1000.0
         return frame
-
-    def _evict_excess_frames(self, frame_buffers, addr):
-        keys = [key for key in frame_buffers if key[0] == addr]
-        if len(keys) < MAX_INFLIGHT_FRAMES_PER_CLIENT:
-            return
-        oldest = min(keys, key=lambda key: frame_buffers[key]["created"])
-        frame_buffers.pop(oldest, None)
-
-    def _cleanup_state(self, frame_buffers):
-        now = time.monotonic()
-        for key in [key for key, value in frame_buffers.items() if now - value["created"] > FRAME_BUFFER_TIMEOUT_S]:
-            frame_buffers.pop(key, None)
-        for addr in [addr for addr, stamp in self.auth_ok.items() if now - stamp > self.auth_ttl_s]:
-            self.auth_ok.pop(addr, None)
-        for nonce in [nonce for nonce, stamp in self.seen_auth_nonces.items() if now - stamp > self.auth_ttl_s]:
-            self.seen_auth_nonces.pop(nonce, None)
 
     def receive_frames(self):
         self.sock.bind((self.host, self.port))
         self.sock.settimeout(0.5)
-        self.start_control_server()
+        self._start_control()
         self.logger.info("Secure UDP vision server listening on %s:%s", self.host, self.port)
-        frame_buffers = {}
-        frame_times = []
-        last_cleanup = time.monotonic()
+
         stop_event = threading.Event()
+        frame_buffers = {}
+        recent_frame_times = []
+        last_cleanup = time.monotonic()
 
         def handle_signal(signum, _frame):
             self.logger.info("Signal %s received", signum)
@@ -692,10 +744,10 @@ class UDPVisionServer:
                         "role": "server",
                         "ts": time.time(),
                         "fps": self.fps,
-                        "latency_ms": round(self.latency, 2),
+                        "latency_ms": round(self.latency_ms, 2),
                         "frames_total": self.frame_count,
-                        "last_valid_packet_s": round(now - self.last_packet_mono, 2),
-                        "last_frame_s": round(now - self.last_frame_mono, 2),
+                        "last_valid_packet_s": round(now - self.last_valid_packet_mono, 2),
+                        "last_completed_frame_s": round(now - self.last_frame_mono, 2),
                     },
                     self.logger,
                 )
@@ -706,10 +758,12 @@ class UDPVisionServer:
 
         try:
             while not stop_event.is_set():
+                packet = None
+                addr = None
                 try:
                     packet, addr = self.sock.recvfrom(65536)
                 except socket.timeout:
-                    packet, addr = None, None
+                    pass
 
                 if packet is not None:
                     if len(packet) < HEADER_SIZE or len(packet) > MAX_UDP_PAYLOAD:
@@ -723,7 +777,7 @@ class UDPVisionServer:
 
                     if frame_id == AUTH_FRAME_ID and total_chunks == 0 and chunk_index == 0:
                         if payload_size == len(payload) and payload_size > 0:
-                            self._handle_auth_packet(header, payload, addr)
+                            self._handle_auth(header, payload, addr)
                         continue
 
                     if not valid_frame_shape(total_chunks, chunk_index, payload_size, len(packet)):
@@ -749,31 +803,15 @@ class UDPVisionServer:
                         frame_buffers.pop(key, None)
                         continue
 
-                    if self.encrypt_udp:
-                        if len(payload) <= NONCE_SIZE + TAG_SIZE:
-                            frame_buffers.pop(key, None)
-                            continue
-                        base_nonce = payload[:NONCE_SIZE]
-                        tag = payload[NONCE_SIZE:NONCE_SIZE + TAG_SIZE]
-                        ciphertext = payload[NONCE_SIZE + TAG_SIZE:]
-                        if entry["base_nonce"] is None:
-                            entry["base_nonce"] = base_nonce
-                        elif not verify_secret(base64.b64encode(base_nonce).decode(), base64.b64encode(entry["base_nonce"]).decode()):
-                            frame_buffers.pop(key, None)
-                            continue
-                        try:
-                            cipher = AES.new(self.udp_key, AES.MODE_GCM, nonce=_derive_nonce(base_nonce, chunk_index))
-                            cipher.update(header)
-                            plain = cipher.decrypt_and_verify(ciphertext, tag)
-                        except Exception:
-                            frame_buffers.pop(key, None)
-                            continue
-                    else:
-                        plain = payload
+                    try:
+                        plain = self._decrypt_chunk(header, payload, entry, chunk_index)
+                    except Exception:
+                        frame_buffers.pop(key, None)
+                        continue
 
                     existing = entry["chunks"].get(chunk_index)
                     if existing is not None:
-                        if existing != plain:
+                        if not hmac.compare_digest(existing, plain):
                             frame_buffers.pop(key, None)
                         continue
                     if entry["bytes"] + len(plain) > MAX_FRAME_BYTES:
@@ -781,7 +819,7 @@ class UDPVisionServer:
                         continue
                     entry["chunks"][chunk_index] = plain
                     entry["bytes"] += len(plain)
-                    self.last_packet_mono = time.monotonic()
+                    self.last_valid_packet_mono = time.monotonic()
 
                     if len(entry["chunks"]) == total_chunks:
                         try:
@@ -799,16 +837,17 @@ class UDPVisionServer:
                         if frame is None:
                             continue
                         self.last_frame_mono = time.monotonic()
-                        processed = self.process_frame(frame)
+                        processed = self._process_frame(frame)
                         self.frame_count += 1
                         now = time.monotonic()
-                        frame_times.append(now)
-                        frame_times = [stamp for stamp in frame_times if now - stamp < 1.0]
-                        self.fps = float(len(frame_times))
+                        recent_frame_times.append(now)
+                        recent_frame_times = [stamp for stamp in recent_frame_times if now - stamp < 1.0]
+                        self.fps = float(len(recent_frame_times))
+
                         if not self.headless:
                             processed = _draw_unicode_text(
                                 processed,
-                                f"FPS: {self.fps:.1f} | Latency: {self.latency:.0f}ms",
+                                f"FPS: {self.fps:.1f} | Latency: {self.latency_ms:.0f}ms",
                                 10,
                                 30,
                                 (0, 255, 0),
@@ -820,20 +859,22 @@ class UDPVisionServer:
 
                 now = time.monotonic()
                 if now - last_cleanup >= 1.0:
-                    self._cleanup_state(frame_buffers)
+                    self._cleanup_security_state(frame_buffers)
                     last_cleanup = now
 
-                idle = now - self.last_packet_mono
-                if self.watchdog_server_idle_s > 0 and idle > self.watchdog_server_idle_s:
-                    raise RuntimeError(f"watchdog: no valid authenticated UDP packets for {idle:.1f}s")
+                frame_idle = now - self.last_frame_mono
+                if self.watchdog_server_frame_idle_s > 0 and frame_idle > self.watchdog_server_frame_idle_s:
+                    raise RuntimeError(f"watchdog: no completed video frame for {frame_idle:.1f}s")
         finally:
             stop_event.set()
-            self._control_stop.set()
-            self.stop_tts()
+            self.control_stop.set()
+            self._stop_tts()
             try:
                 self.sock.close()
             except Exception:
                 pass
+            if self.control_thread and self.control_thread.is_alive():
+                self.control_thread.join(timeout=1.0)
             if not self.headless:
                 cv2.destroyAllWindows()
             self.logger.info("UDP server stopped")
@@ -845,18 +886,20 @@ class UDPCameraClient:
         self.server_port = int(server_port)
         if not 1 <= self.server_port <= 65535:
             raise ValueError("server port must be in 1..65535")
-        self.encrypt_udp, self.udp_key, self.require_auth, self.auth_token = _require_secure_transport()
+
+        self.encrypt_udp, self.udp_key, self.require_auth, self.auth_token = _secure_transport_settings()
         self.auth_refresh_s = max(float(os.environ.get("WVAB_UDP_AUTH_REFRESH_S", "30")), 2.0)
         self.health_path = os.environ.get("WVAB_UDP_HEALTH_PATH", "").strip() or None
         self.health_interval_s = max(float(os.environ.get("WVAB_UDP_HEALTH_INTERVAL_S", HEALTH_INTERVAL_DEFAULT_S)), 0.5)
         self.watchdog_check_s = max(float(os.environ.get("WVAB_UDP_WATCHDOG_CHECK_S", WATCHDOG_CHECK_DEFAULT_S)), 0.2)
-        self.watchdog_client_idle_s = float(
-            os.environ.get("WVAB_UDP_WATCHDOG_CLIENT_IDLE_S", WATCHDOG_CLIENT_IDLE_DEFAULT_S)
+        self.watchdog_client_send_idle_s = float(
+            os.environ.get("WVAB_UDP_WATCHDOG_CLIENT_IDLE_S", WATCHDOG_CLIENT_SEND_IDLE_DEFAULT_S)
         )
         self.logger = _setup_logger()
         self.sock = self._new_socket()
-        self.last_send_mono = time.monotonic()
-        self.last_frame_mono = time.monotonic()
+        now = time.monotonic()
+        self.last_send_mono = now
+        self.last_camera_frame_mono = now
         self.force_auth = True
         self.watchdog_error = None
 
@@ -874,7 +917,7 @@ class UDPCameraClient:
         self.sock = self._new_socket()
         self.force_auth = True
 
-    def _send_packet(self, packet):
+    def _send_packet(self, packet: bytes):
         try:
             self.sock.sendto(packet, (self.server_ip, self.server_port))
         except OSError:
@@ -902,19 +945,19 @@ class UDPCameraClient:
         self.force_auth = False
 
     @staticmethod
-    def _normalize_camera_source(source):
+    def _camera_source(source):
         text = str(source).strip()
         return int(text) if text.isdigit() else text
 
     def send_frames(self, camera_source=0):
-        camera_source = self._normalize_camera_source(camera_source)
+        camera_source = self._camera_source(camera_source)
         cap = cv2.VideoCapture(camera_source)
         if not cap.isOpened():
             raise RuntimeError(f"Could not open camera {camera_source}")
 
         frame_id = 0
         last_auth = 0.0
-        last_camera_ok = time.monotonic()
+        camera_failure_since = None
         stop_event = threading.Event()
 
         def handle_signal(signum, _frame):
@@ -937,7 +980,7 @@ class UDPCameraClient:
                         "ts": time.time(),
                         "server": f"{self.server_ip}:{self.server_port}",
                         "last_send_s": round(now - self.last_send_mono, 2),
-                        "last_frame_s": round(now - self.last_frame_mono, 2),
+                        "last_camera_frame_s": round(now - self.last_camera_frame_mono, 2),
                     },
                     self.logger,
                 )
@@ -946,30 +989,32 @@ class UDPCameraClient:
         def watchdog_loop():
             while not stop_event.wait(self.watchdog_check_s):
                 idle = time.monotonic() - self.last_send_mono
-                if self.watchdog_client_idle_s > 0 and idle > self.watchdog_client_idle_s:
-                    self.watchdog_error = f"watchdog: no successful UDP sends for {idle:.1f}s"
+                if self.watchdog_client_send_idle_s > 0 and idle > self.watchdog_client_send_idle_s:
+                    self.watchdog_error = f"watchdog: no successful local UDP send for {idle:.1f}s"
                     stop_event.set()
                     return
 
         if self.health_path:
             threading.Thread(target=health_loop, daemon=True).start()
-        if self.watchdog_client_idle_s > 0:
+        if self.watchdog_client_send_idle_s > 0:
             threading.Thread(target=watchdog_loop, daemon=True).start()
 
         try:
             while not stop_event.is_set():
                 ok, frame = cap.read()
                 if not ok or frame is None:
-                    if time.monotonic() - last_camera_ok > 5.0:
+                    if camera_failure_since is None:
+                        camera_failure_since = time.monotonic()
+                    if time.monotonic() - camera_failure_since >= 5.0:
                         self.logger.warning("Camera read timeout; reopening source")
                         cap.release()
                         stop_event.wait(0.5)
                         cap = cv2.VideoCapture(camera_source)
-                        last_camera_ok = time.monotonic()
+                        camera_failure_since = time.monotonic()
                     continue
 
-                last_camera_ok = time.monotonic()
-                self.last_frame_mono = last_camera_ok
+                camera_failure_since = None
+                self.last_camera_frame_mono = time.monotonic()
                 frame = cv2.resize(frame, (640, 360))
                 encoded, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
                 if not encoded:
@@ -992,9 +1037,7 @@ class UDPCameraClient:
                 base_nonce = get_random_bytes(NONCE_SIZE) if self.encrypt_udp else None
                 for chunk_index in range(total_chunks):
                     plain = data[chunk_index * max_plain:(chunk_index + 1) * max_plain]
-                    payload_size = len(plain)
-                    if self.encrypt_udp:
-                        payload_size += NONCE_SIZE + TAG_SIZE
+                    payload_size = len(plain) + (NONCE_SIZE + TAG_SIZE if self.encrypt_udp else 0)
                     header = pack_header(frame_id, total_chunks, chunk_index, payload_size)
                     if self.encrypt_udp:
                         cipher = AES.new(self.udp_key, AES.MODE_GCM, nonce=_derive_nonce(base_nonce, chunk_index))
@@ -1005,9 +1048,7 @@ class UDPCameraClient:
                         payload = plain
                     self._send_packet(header + payload)
 
-                frame_id += 1
-                if frame_id > MAX_DATA_FRAME_ID:
-                    frame_id = 0
+                frame_id = 0 if frame_id >= MAX_DATA_FRAME_ID else frame_id + 1
                 if not _bool_env("WVAB_UDP_CLIENT_HEADLESS", "0"):
                     cv2.imshow("WVAB - Camera Client", frame)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -1021,15 +1062,16 @@ class UDPCameraClient:
                 pass
             if not _bool_env("WVAB_UDP_CLIENT_HEADLESS", "0"):
                 cv2.destroyAllWindows()
+
         if self.watchdog_error:
             raise RuntimeError(self.watchdog_error)
 
 
 def _build_parser():
     parser = argparse.ArgumentParser(description="WVAB secure low-latency UDP streaming")
-    sub = parser.add_subparsers(dest="mode", required=True)
+    subparsers = parser.add_subparsers(dest="mode", required=True)
 
-    server = sub.add_parser("server")
+    server = subparsers.add_parser("server")
     server.add_argument("--config", default=None)
     server.add_argument("--host", default="0.0.0.0")
     server.add_argument("--port", type=int, default=9999)
@@ -1043,7 +1085,7 @@ def _build_parser():
     server.add_argument("--restart-max", type=int, default=3)
     server.add_argument("--restart-delay", type=float, default=2.0)
 
-    client = sub.add_parser("client")
+    client = subparsers.add_parser("client")
     client.add_argument("--config", default=None)
     client.add_argument("--server-ip", default="192.168.4.1")
     client.add_argument("--server-port", type=int, default=9999)
@@ -1099,7 +1141,7 @@ def main():
     logger = _setup_logger()
 
     def run_with_restart(factory, runner, label):
-        attempts = 0
+        failures = 0
         while True:
             instance = factory()
             try:
@@ -1108,9 +1150,9 @@ def main():
             except KeyboardInterrupt:
                 return
             except Exception as exc:
-                attempts += 1
-                logger.exception("%s crashed: %s", label, exc)
-                if not args.auto_restart or attempts > args.restart_max:
+                failures += 1
+                logger.exception("%s stopped with error: %s", label, exc)
+                if not args.auto_restart or failures > args.restart_max:
                     raise
                 time.sleep(args.restart_delay)
 
