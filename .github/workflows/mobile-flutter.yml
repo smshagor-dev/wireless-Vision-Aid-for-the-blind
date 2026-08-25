@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - mobile-app-foundation
     paths:
       - mobile/flutter/**
       - .github/workflows/mobile-flutter.yml
@@ -19,7 +18,7 @@ permissions:
 
 concurrency:
   group: mobile-flutter-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   flutter-mobile:
@@ -63,17 +62,22 @@ jobs:
           grep -F 'android.permission.VIBRATE' android/app/src/main/AndroidManifest.xml >/dev/null
           grep -F 'android.intent.action.TTS_SERVICE' android/app/src/main/AndroidManifest.xml >/dev/null
 
-      - name: Build debug APK
-        run: flutter build apk --debug
+      - name: Build split debug APKs
+        run: flutter build apk --debug --split-per-abi
 
-      - name: Verify APK artifact
+      - name: Verify APK artifacts
         shell: bash
-        run: test -s build/app/outputs/flutter-apk/app-debug.apk
+        run: |
+          set -euo pipefail
+          test -s build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk
+          test -s build/app/outputs/flutter-apk/app-armeabi-v7a-debug.apk
+          test -s build/app/outputs/flutter-apk/app-x86_64-debug.apk
+          test "$(stat -c%s build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk)" -lt 104857600
 
-      - name: Upload debug APK
+      - name: Upload debug APKs
         uses: actions/upload-artifact@v7.0.1
         with:
           name: wvab-mobile-debug-${{ github.sha }}
-          path: mobile/flutter/build/app/outputs/flutter-apk/app-debug.apk
+          path: mobile/flutter/build/app/outputs/flutter-apk/*-debug.apk
           if-no-files-found: error
           retention-days: 7
