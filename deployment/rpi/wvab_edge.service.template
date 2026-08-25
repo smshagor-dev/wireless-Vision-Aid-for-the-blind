@@ -8,6 +8,7 @@ Type=simple
 User=@USER@
 WorkingDirectory=@ROOT@
 EnvironmentFile=@ROOT@/deployment/rpi/wvab_edge.env
+Environment="WVAB_PYTHON_BIN=@PYTHON@"
 ExecStart=@ROOT@/deployment/rpi/wvab_edge_start.sh
 Restart=on-failure
 RestartSec=3
