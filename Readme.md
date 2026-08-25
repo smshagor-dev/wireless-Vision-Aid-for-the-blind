@@ -7,8 +7,9 @@ WVAB is an offline-first computer-vision assistance platform for blind and low-v
 ## Supported runtime paths
 
 - `vision_server.py` — local USB or trusted IP-camera assistive detection with qualitative proximity only
-- `udp_streaming.py` — compatibility entrypoint for authenticated/encrypted remote camera streaming
-- `core/udp_runtime.py` — secure UDP runtime/session implementation
+- `udp_streaming.py` — authenticated/encrypted remote camera streaming with protocol-v2 restart replay protection
+- `core/udp_runtime.py` — shared UDP transport/session implementation
+- `core/udp_auth_state.py` — versioned authentication payload + persistent replay state
 - `navigation_pipeline.py` — experimental fail-safe navigation path publishing `STOP`, `DEGRADED`, or `GUIDANCE_AVAILABLE`
 - `smartphone_camera.py` — explicit trusted smartphone/IP stream launcher
 - `main.py` — source-checkout command dispatcher
@@ -19,12 +20,15 @@ Legacy mock/duplicate GUI runtimes were removed because they displayed hard-code
 
 - YOLOv8 real-time object detection
 - qualitative proximity guidance: `immediate`, `close`, `medium`, `far`
+- normalized mobility-hazard policy for COCO names and custom WVAB classes such as `traffic_light`, `stop_sign`, `curb`, `pothole`, `crosswalk`, and `stairs`
 - optional calibrated pinhole-distance utility for controlled experiments
 - multilingual labels and TTS
 - bundled Bengali, Devanagari, and Arabic overlay fonts
 - webcam, smartphone/IP-camera, Python UDP sender, and ESP32-CAM paths
 - AES-GCM encrypted UDP transport with authentication required by default
-- authenticated 32-bit sender session IDs and reboot-safe frame replay protection
+- authenticated 32-bit sender session IDs and wrap-aware frame replay protection
+- protocol-v2 authentication with monotonic 64-bit auth counters and authenticated next-frame baselines
+- persistent authentication replay state across normal server/container restarts
 - full 14-byte UDP header authenticated as AES-GCM AAD
 - bounded authentication/session/frame replay state and in-flight frame memory
 - IoU-based temporal object tracking
@@ -36,9 +40,8 @@ Legacy mock/duplicate GUI runtimes were removed because they displayed hard-code
 - occupancy-grid mapping and A* planning research pipeline
 - fail-safe `STOP` / `DEGRADED` / `GUIDANCE_AVAILABLE` state output
 - optional ONNX/OpenVINO/TensorRT export validation
-- non-root Docker runtime with local-secret build exclusions
-- Python 3.10/3.11/3.12 CI definitions, wheel-content verification, and lightweight unit tests
-- clean C++17 planner build/demo validation in CI
+- non-root Docker runtime with local-secret build exclusions and persistent replay-state volume
+- Python 3.10/3.11/3.12 CI, wheel-content/install verification, C++17 build/demo validation, and ESP32 firmware compilation
 - SLSA source-provenance workflow for releases/manual provenance generation
 
 ## Requirements
@@ -67,7 +70,7 @@ The larger MiDaS depth weight is intentionally excluded from source control. Pro
 python tools/download_models.py midas
 ```
 
-The MiDaS provisioner downloads the expected upstream legacy asset, verifies its SHA256 before installation, and prepares the Torch Hub source cache required for later offline depth startup. If local assets are missing while `WVAB_OFFLINE=1`, depth disables cleanly instead of silently reaching the network.
+The MiDaS provisioner verifies its expected checksum and prepares the local Torch Hub source cache required for later offline depth startup. If local assets are missing while `WVAB_OFFLINE=1`, depth disables cleanly instead of silently reaching the network.
 
 ## Quick start
 
@@ -102,15 +105,19 @@ This creates git-ignored:
 - `esp32_secrets.h`
 - `deployment/rpi/wvab_edge.env`
 
+The generated Pi environment also configures persistent replay state at `state/udp_replay_state.json`.
+
 Flash `esp32_cam_stream.ino` with the generated header, then run:
 
 ```bash
 ./quick_start.sh run esp32
 ```
 
-The release firmware is secure-UDP-only. It creates a fresh non-zero session ID at boot, authenticates/encrypts every datagram with AES-GCM, and authenticates the complete packet header as AAD. A newly authenticated session retires the previous sender session, allowing an ESP32/Python sender reboot to restart its frame counter safely without disabling replay protection. Authentication refresh within the same session does not reset frame replay state.
+The release firmware is secure-UDP-only. It creates a fresh non-zero session ID at boot, authenticates/encrypts every datagram with AES-GCM, and authenticates the complete packet header as AAD. Protocol-v2 authentication binds a monotonic auth counter and the sender's next video-frame ID into each encrypted authentication refresh. The server persists the highest accepted auth counter before granting/renewing the session, so a captured auth datagram does not become valid again merely because the server process restarts.
 
-See `SECURE_UDP_PROTOCOL.md` for the exact wire contract and replay/resource bounds.
+A newly authenticated sender session retires the previous live session. Authentication refresh may advance the video replay baseline but may never move it backwards.
+
+**Do not delete or roll back the replay-state file during a deployment.** If it is lost, deleted, or restored from an older backup, rotate/re-pair the UDP key and token before field use. See `SECURE_UDP_PROTOCOL.md` for the exact wire contract and recovery rules.
 
 ### Raspberry Pi service
 
@@ -121,7 +128,7 @@ sudo bash deployment/rpi/install_service.sh
 systemctl status wvab_edge.service
 ```
 
-This prevents a rebooted service from falling back to an unprepared system Python.
+The service works from the project root, so `state/udp_replay_state.json` survives normal process/service restarts.
 
 ## Smartphone/IP camera
 
@@ -145,7 +152,7 @@ python main.py udp-server --config wvab_config.sample.json
 python main.py udp-client --config wvab_config.sample.json --server-ip 127.0.0.1 --camera 0
 ```
 
-Authentication and encryption are required by default. `WVAB_ALLOW_INSECURE_UDP=1` is an explicit isolated-development exception and must not be used for normal wearable/field deployment.
+Authentication and encryption are required by default. The Python sender uses the same protocol-v2 auth-counter/frame-baseline contract as the ESP32 sender. `WVAB_ALLOW_INSECURE_UDP=1` is an explicit isolated-development exception and must not be used for normal wearable/field deployment.
 
 WebSocket control belongs to the UDP server, binds to `127.0.0.1:8765` by default, and requires a secret for every command. Remote binding requires a dedicated WebSocket token and should only be used behind an explicitly trusted/TLS network boundary.
 
@@ -163,7 +170,7 @@ bash deployment/docker_start.sh up -d udp-vision-server
 
 Do not replace the wrapper with a plain `docker compose up` when using a non-default generated port; Compose service `env_file` values are not used for YAML port interpolation unless the file is also supplied as Compose's `--env-file`.
 
-The image runs as non-root user `wvab`. The UDP server disables TTS/WebSocket control inside the container and enables a completed/decodeable-frame watchdog. The container health check requires both a fresh health record and a recent completed video frame.
+The image runs as non-root user `wvab`. The UDP server disables TTS/WebSocket control inside the container and enables a completed/decodeable-frame watchdog. Persistent replay state is stored at `/var/lib/wvab/udp_replay_state.json` in the `wvab-replay-state` named volume. Preserve that volume across normal upgrades/recreation. If the volume is deliberately removed or restored from stale backup, re-pair/rotate UDP credentials before field use.
 
 Optional headless navigation + Prometheus on Linux:
 
@@ -222,8 +229,6 @@ python -m pip install -r requirements-accelerators.txt
 python export_accelerated_models.py --format openvino
 ```
 
-Export commands fail fast when required backend dependencies or local source models are missing instead of silently relying on hidden downloads in the normal offline path.
-
 ## Testing
 
 Fast device-independent validation:
@@ -239,7 +244,14 @@ Full host diagnostics:
 ./quick_start.sh doctor --full --camera 0 --tts
 ```
 
-The CI definition covers Python 3.10/3.11/3.12, wheel content plus isolated installed imports, Python compilation, shell/CLI syntax, UDP protocol/session tests, clean C++17 planner build/demo execution, repository hygiene, secret exclusion, container custom-port invariants, and known insecure-default regressions. A GitHub workflow being configured is not itself field-validation evidence; release hardware tests remain separate.
+Runtime soak evidence can be recorded and summarized with:
+
+```bash
+python tools/soak_monitor.py --help
+python tools/summarize_soak.py --help
+```
+
+CI covers Python 3.10/3.11/3.12, wheel content plus isolated installed imports, UDP cryptographic/restart replay tests, Python compilation, shell/CLI syntax, clean C++17 planner build/demo execution, repository hygiene, secret exclusion, Docker replay-state/custom-port invariants, and actual ESP32 firmware compilation. Automated CI is not field-validation evidence; release hardware tests remain separate.
 
 ## Production-readiness gates
 
@@ -247,7 +259,8 @@ Before any field-ready claim, record evidence for at least:
 
 - 8+ hour soak testing without unbounded memory growth
 - camera/network/TTS dropout recovery
-- authenticated/encrypted transport, header-tamper rejection, replay rejection, and sender reboot/session rotation
+- authenticated/encrypted transport, header-tamper rejection, auth/frame replay rejection, and sender/server reboot behavior
+- persistent replay-state loss/corruption recovery procedure
 - completed-frame watchdog and reconnect behavior
 - model accuracy on representative mobility hazards
 - calibrated depth/distance and localization error statistics where metric claims are made
@@ -261,10 +274,4 @@ See `PRODUCTION_READINESS.md` and `production.md`.
 
 Original WVAB code is distributed under the repository **MIT License**. Third-party software, models, fonts, datasets, and dependencies retain their own applicable licenses/terms and are not relicensed merely because they are used by or stored in this repository.
 
-Review:
-
-- `LICENSE`
-- `PROJECT_OWNERSHIP.md`
-- `THIRD_PARTY_NOTICES.md`
-
-before redistribution or commercial deployment.
+Review `LICENSE`, `PROJECT_OWNERSHIP.md`, and `THIRD_PARTY_NOTICES.md` before redistribution or commercial deployment.
