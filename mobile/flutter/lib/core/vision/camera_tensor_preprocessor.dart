@@ -2,12 +2,14 @@ import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 
+import 'vision_input.dart';
+
 class CameraTensorPreprocessor {
   const CameraTensorPreprocessor({this.inputSize = 320});
 
   final int inputSize;
 
-  Float32List preprocess(CameraImage image, {required int rotationDegrees}) {
+  PreparedVisionInput preprocess(CameraImage image, {required int rotationDegrees}) {
     if (image.planes.length < 3) {
       throw StateError('WVAB requires Android YUV420 camera frames.');
     }
@@ -50,12 +52,9 @@ class CameraTensorPreprocessor {
         );
         final sx = source.$1.clamp(0, sourceWidth - 1);
         final sy = source.$2.clamp(0, sourceHeight - 1);
-
         final yIndex = sy * yPlane.bytesPerRow + sx;
         final uvIndex = (sy ~/ 2) * uPlane.bytesPerRow + (sx ~/ 2) * uvPixelStride;
-        if (yIndex >= yPlane.bytes.length || uvIndex >= uPlane.bytes.length || uvIndex >= vPlane.bytes.length) {
-          continue;
-        }
+        if (yIndex >= yPlane.bytes.length || uvIndex >= uPlane.bytes.length || uvIndex >= vPlane.bytes.length) continue;
         final yValue = yPlane.bytes[yIndex].toDouble();
         final uValue = uPlane.bytes[uvIndex].toDouble() - 128.0;
         final vValue = vPlane.bytes[uvIndex].toDouble() - 128.0;
@@ -68,16 +67,20 @@ class CameraTensorPreprocessor {
         tensor[2 * pixels + index] = b;
       }
     }
-    return tensor;
+    return PreparedVisionInput(
+      tensor: tensor,
+      transform: LetterboxTransform(
+        inputSize: inputSize,
+        sourceWidth: orientedWidth,
+        sourceHeight: orientedHeight,
+        scale: scale,
+        padX: padX,
+        padY: padY,
+      ),
+    );
   }
 
-  (int, int) _sourceCoordinate(
-    int x,
-    int y,
-    int sourceWidth,
-    int sourceHeight,
-    int rotation,
-  ) {
+  (int, int) _sourceCoordinate(int x, int y, int sourceWidth, int sourceHeight, int rotation) {
     return switch (rotation) {
       0 => (x, y),
       90 => (y, sourceHeight - 1 - x),
