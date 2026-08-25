@@ -1,55 +1,87 @@
-<!--
-Name: Md. Shahanur Islam Shagor
-Autonomous Systems & UAV Researcher | Cybersecurity Specialist | Software Engineer
-Voronezh State University of Forestry and Technologies
-Build for Blind people within 15$
--->
+# WVAB Quick Start
 
-# QUICK START
+## 1. Setup and deterministic diagnostics
 
-## 1) Setup & Run
+WVAB requires Python 3.10+.
 
 ```bash
 ./quick_start.sh setup
 ./quick_start.sh doctor
+./quick_start.sh doctor --full --camera 0 --tts
+```
+
+The doctor is offline-first and non-interactive. It does not require Internet connectivity or claim that hardware is field-safe.
+
+## 2. Local or IP-camera runtime
+
+USB/local camera:
+
+```bash
+./quick_start.sh run vision --camera 0
+```
+
+Smartphone/IP camera: use the exact trusted URL displayed by the phone app. WVAB no longer scans the local subnet for cameras.
+
+```bash
+./quick_start.sh run phone http://192.168.1.20:8080/video --test-only
+./quick_start.sh run phone http://192.168.1.20:8080/video
+```
+
+This runtime reports qualitative proximity only; it does not label bounding-box heuristics as meters and exposes no remote control socket.
+
+## 3. Pair an ESP32-CAM with Raspberry Pi
+
+Generate matching, git-ignored device credentials:
+
+```bash
+python tools/generate_device_secrets.py --server-ip 192.168.4.2
+./quick_start.sh doctor --deployment
+```
+
+Flash `esp32_cam_stream.ino` with the generated `esp32_secrets.h` beside the sketch, then start the authenticated AES-GCM edge path:
+
+```bash
 ./quick_start.sh run esp32
 ```
 
-Other run modes:
+For station-mode Wi-Fi, pass `--station --ssid ... --wifi-password ... --server-ip ...` to the generator.
+
+## 4. Optional MiDaS depth provisioning
 
 ```bash
-./quick_start.sh run phone
+python tools/download_models.py midas
+```
+
+The 85 MB MiDaS weight is not stored in the source tree. The downloader verifies its checksum and prepares the Torch Hub source cache.
+
+## 5. Secure Python UDP server/client
+
+For a Python camera sender instead of ESP32, export deployment-specific `WVAB_UDP_KEY_HEX` and `WVAB_UDP_TOKEN`, then run:
+
+```bash
 ./quick_start.sh run udp-server
-./quick_start.sh run udp-client 192.168.1.10
+./quick_start.sh run udp-client 127.0.0.1
 ```
 
-## 2) Cheap real-life C++ planner module
+The canonical remote camera path is the authenticated/encrypted UDP runtime in `udp_streaming.py`.
 
-Files:
-- `cpp/navigation_planner.h`
-- `cpp/navigation_planner.cpp`
+## 6. Root command dispatcher
 
-This module takes detections (`class_name`, `confidence`, bbox center/area) and returns:
-- `GO LEFT`
-- `GO RIGHT`
-- `GO STRAIGHT`
-- `SLOW - path blocked ahead`
-- `STOP - obstacle very close`
-
-## 3) Build C++ demo
-
-Using CMake:
+The repository root no longer points to nonexistent Android modules. Use:
 
 ```bash
-cd cpp
-cmake -S . -B build
-cmake --build build --config Release
-./build/navigation_demo
+python main.py --help
+python main.py doctor --full --camera 0
+python main.py vision --camera 0
+python main.py phone http://192.168.1.20:8080/video --test-only
+python main.py udp-server --config wvab_config.sample.json
 ```
 
-Or with g++ directly:
+## 7. C++ planner experiment
 
 ```bash
-g++ -std=c++17 -O2 -Icpp cpp/navigation_planner.cpp cpp/main_demo.cpp -o navigation_demo
-./navigation_demo
+cmake -S cpp -B cpp/build
+cmake --build cpp/build --config Release
 ```
+
+The planner output is experimental and is not a certified mobility-safety controller. `cpp/build/` is intentionally ignored.

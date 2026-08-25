@@ -1,6 +1,9 @@
 system:
   log_dir: logs
   log_level: INFO
+  headless: false
+  metrics_enabled: true
+  metrics_port: 8000
 
 camera:
   source: 0
@@ -34,7 +37,6 @@ mapping:
     origin_x: -10.0
     origin_y: -10.0
   slam:
-    # VO is the portable default. ORB-SLAM3 can be enabled explicitly.
     backend: vo
     metric_scale_calibrated: false
     command:

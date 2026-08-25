@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# Optional Intel/OpenVINO export and runtime support.
+openvino>=2024,<2027

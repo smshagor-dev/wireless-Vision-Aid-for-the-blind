@@ -1,30 +1,42 @@
-# Dataset Downloads (Auto + Manual)
+# Dataset and Model Downloads
 
-## Auto (no-login)
-Run:
+## Runtime model provisioning
+
+The large MiDaS depth weight is intentionally not committed to the source repository. After installing `requirements.txt`, provision it once while online:
+
+```bash
+python tools/download_models.py midas
+```
+
+The provisioner downloads the official MiDaS v2.1 small weight, verifies SHA256 `70d6b9c891758c67f974a6097fb0c608c7ee67fb81ac3e5588847d5596d56fca`, and prepares the Torch Hub source cache used by offline depth startup.
+
+For weights only:
+
+```bash
+python tools/download_models.py midas --weights-only
+```
+
+The downloaded file is stored at `data/models/midas_v21_small_256.pt` and ignored by Git.
+
+## Dataset downloads: automatic
+
+```bash
 python training/auto_download.py
+```
 
-This downloads COCO 2017 train/val + annotations into:
-- data/raw/coco2017
+This downloads COCO 2017 train/val + annotations into `data/raw/coco2017`.
 
-## Manual (login/license required)
+## Dataset downloads: manual
+
 These datasets require registration or license acceptance. Download manually, then place under `data/raw`:
 
-- BDD100K (driving scenes, traffic signals)
-  Place under: data/raw/bdd100k
+- BDD100K: `data/raw/bdd100k`
+- Cityscapes: `data/raw/cityscapes`
+- ADE20K: `data/raw/ade20k`
+- RDD2022 Road Damage: `data/raw/rdd2022`
+- Open Images V7: `data/raw/openimages`
 
-- Cityscapes (urban scenes, poles/traffic lights)
-  Place under: data/raw/cityscapes
+After download, use the merge/conversion utilities to produce:
 
-- ADE20K (indoor scenes, wall/floor/window/stairs)
-  Place under: data/raw/ade20k
-
-- RDD2022 Road Damage (pothole)
-  Place under: data/raw/rdd2022
-
-- Open Images V7 (fan, cone, long-tail objects)
-  Place under: data/raw/openimages
-
-After manual download, we will run a merge/convert script to produce:
-- data/custom_wvab/images/train|val
-- data/custom_wvab/labels/train|val
+- `data/custom_wvab/images/train|val`
+- `data/custom_wvab/labels/train|val`
