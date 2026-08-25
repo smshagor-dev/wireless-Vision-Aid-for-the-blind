@@ -14,7 +14,7 @@ WVAB is an offline-first computer-vision assistance platform for blind and low-v
 - Webcam, smartphone/IP camera, and ESP32-CAM paths
 - Secure UDP transport with AES-GCM and token authentication enabled by default
 - IoU-based temporal object tracking
-- WebSocket runtime control for language, confidence, and object filtering
+- Authenticated WebSocket runtime control for language, confidence, and object filtering
 - Health files, reconnect handling, watchdogs, and bounded auto-restart
 - Raspberry Pi edge service configuration
 - MiDaS depth research path with explicit metric-calibration gating
@@ -53,29 +53,27 @@ print("WVAB_UDP_TOKEN=" + secrets.token_urlsafe(24))
 PY
 ```
 
-Then export them in your environment and run:
+Export those values in your environment before starting the server/client. The sample config intentionally contains blank credentials so a deployment fails closed instead of silently using a shared example secret.
 
 ```bash
 python udp_streaming.py server --config wvab_config.sample.json
 python udp_streaming.py client --config wvab_config.sample.json
 ```
 
-Do not deploy the example key/token from `wvab_config.sample.json` unchanged.
-
 ## WebSocket control
 
-The UDP server exposes a control socket on port `8765` by default when `WVAB_WS_CONTROL=1`.
+WebSocket control is enabled by default but binds only to `127.0.0.1:8765`. Every command requires a shared secret. `WVAB_WS_TOKEN` is preferred; when it is blank, the server falls back to `WVAB_UDP_TOKEN`.
 
-Supported JSON commands:
+For local control, send the token with every JSON command:
 
 ```json
-{"cmd":"set_language","value":"bn"}
-{"cmd":"set_all_objects","value":true}
-{"cmd":"set_confidence","value":0.4}
-{"cmd":"status"}
+{"token":"<control-token>","cmd":"set_language","value":"bn"}
+{"token":"<control-token>","cmd":"set_all_objects","value":true}
+{"token":"<control-token>","cmd":"set_confidence","value":0.4}
+{"token":"<control-token>","cmd":"status"}
 ```
 
-The server validates language and confidence values before applying them.
+The server validates the token using constant-time comparison and validates command values before applying changes. If remote control is intentionally required, set `WVAB_WS_CONTROL_HOST=0.0.0.0` only on a trusted network/firewall boundary and keep a unique `WVAB_WS_TOKEN` configured.
 
 ## Distance and depth semantics
 
@@ -103,7 +101,7 @@ Bundled overlay fonts:
 - `assets/fonts/NotoSansDevanagari-Regular.ttf`
 - `assets/fonts/NotoNaskhArabic-Regular.ttf`
 
-The runtime now checks bundled fonts for Bengali/Hindi/Arabic before falling back to system fonts. `WVAB_FONT_PATH` can override the selection.
+The runtime checks bundled fonts for Bengali/Hindi/Arabic before falling back to system fonts. `WVAB_FONT_PATH` can override the selection.
 
 TTS still depends on voices installed on the target OS. Windows voice-pack helpers remain available:
 
@@ -125,7 +123,7 @@ pip install -r requirements.txt
 bash deployment/rpi/wvab_edge_start.sh
 ```
 
-Review `deployment/rpi/wvab_edge.env` and replace all deployment credentials before use.
+`deployment/rpi/wvab_edge_start.sh` now refuses to start when UDP authentication/encryption is disabled, the token is blank, or the AES key is invalid. WebSocket control stays loopback-only by default.
 
 ## Training and export
 
@@ -147,7 +145,7 @@ python -m pip install -r requirements-ci.txt
 python -m pytest -q
 ```
 
-The test suite covers configuration validation, proximity semantics, calibrated-distance math, Unicode font selection, missing-depth handling, fail-safe state output, occupancy-grid behavior, and A* obstacle avoidance.
+The test suite covers configuration validation, proximity semantics, calibrated-distance math, Unicode font selection, control-channel secret handling, missing-depth handling, fail-safe state output, occupancy-grid behavior, and A* obstacle avoidance.
 
 Full runtime smoke import is opt-in because it requires heavyweight ML/device dependencies:
 
@@ -167,7 +165,7 @@ Before describing a build as field-ready, record and publish evidence for at lea
 
 - 8+ hour soak testing without unbounded memory growth
 - camera/network/TTS dropout recovery
-- authenticated/encrypted transport validation
+- authenticated/encrypted transport and control-channel validation
 - model accuracy on representative mobility hazards
 - calibrated distance/depth error statistics where metric claims are made
 - end-to-end latency distribution, not only best-case latency

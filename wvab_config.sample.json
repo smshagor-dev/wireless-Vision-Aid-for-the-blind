@@ -11,7 +11,9 @@
     "WVAB_UDP_HEALTH_INTERVAL_S": "5",
     "WVAB_UDP_WATCHDOG_CHECK_S": "2",
     "WVAB_WS_CONTROL": "1",
-    "WVAB_WS_CONTROL_PORT": "8765"
+    "WVAB_WS_CONTROL_HOST": "127.0.0.1",
+    "WVAB_WS_CONTROL_PORT": "8765",
+    "WVAB_WS_TOKEN": ""
   },
   "server_env": {
     "WVAB_UDP_HEADLESS": "1",

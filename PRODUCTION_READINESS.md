@@ -40,7 +40,7 @@ Minimum release evidence:
 - camera disconnect/reconnect test
 - sender/network loss and recovery test
 - TTS failure/recovery test
-- watchdog and bounded auto-restart test
+- client/server watchdog and bounded auto-restart test
 - malformed/incomplete UDP frame test
 
 ## 5. Security baseline
@@ -52,8 +52,11 @@ Required defaults:
 - AES key length 16/24/32 bytes; 32 bytes recommended
 - unique token and key per deployment
 - example credentials must never be reused in a real deployment
+- WebSocket control binds to `127.0.0.1` by default
+- every WebSocket control command is authenticated
+- use a dedicated `WVAB_WS_TOKEN` when control is exposed beyond loopback
 
-The current UDP payload uses AES-GCM integrity protection. Authentication expires and must be refreshed by the sender.
+The UDP payload uses AES-GCM integrity protection. UDP authentication expires and is refreshed by the sender. UDP and WebSocket shared secrets are compared using constant-time comparison. Remote WebSocket binding must be treated as an explicit deployment decision and protected by network-level controls as well as the application token.
 
 ## 6. Realtime performance
 

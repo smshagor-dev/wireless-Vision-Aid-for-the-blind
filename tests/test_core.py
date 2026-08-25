@@ -7,6 +7,7 @@ from core.config import validate_navigation_config
 from core.font_paths import overlay_font_candidates
 from core.proximity import classify_bbox_proximity, estimate_metric_distance
 from core.safety import SafetyStatePublisher
+from core.security import normalize_control_host, resolve_control_token, verify_secret
 from mapping.occupancy_grid import OccupancyGrid
 from navigation.a_star import a_star
 from perception.perception_mapping import detections_to_points
@@ -61,19 +62,23 @@ def test_metric_distance_requires_explicit_calibration_inputs():
 
 
 def test_bengali_font_candidates_include_bundled_font():
-    candidates = overlay_font_candidates("bn")
-    assert candidates
-    assert candidates[0].endswith("assets/fonts/NotoSansBengali-Regular.ttf")
+    assert overlay_font_candidates("bn")[0].endswith("assets/fonts/NotoSansBengali-Regular.ttf")
 
 
 def test_arabic_font_candidates_include_bundled_font():
-    candidates = overlay_font_candidates("ar")
-    assert candidates[0].endswith("assets/fonts/NotoNaskhArabic-Regular.ttf")
+    assert overlay_font_candidates("ar")[0].endswith("assets/fonts/NotoNaskhArabic-Regular.ttf")
+
+
+def test_control_security_defaults_to_loopback_and_requires_secret():
+    assert normalize_control_host(None) == "127.0.0.1"
+    assert resolve_control_token("", "udp-secret") == "udp-secret"
+    assert verify_secret("udp-secret", "udp-secret") is True
+    assert verify_secret("wrong", "udp-secret") is False
+    assert verify_secret("anything", "") is False
 
 
 def test_depth_mapping_handles_unavailable_depth():
-    points = detections_to_points([], None, {"fx": 1, "fy": 1, "cx": 0, "cy": 0})
-    assert points == []
+    assert detections_to_points([], None, {"fx": 1, "fy": 1, "cx": 0, "cy": 0}) == []
 
 
 def test_depth_mapping_projects_finite_points():
