@@ -21,7 +21,7 @@ WVAB is an offline-first computer-vision assistance platform for blind and low-v
 - Visual odometry and optional ORB-SLAM3 bridge
 - Occupancy-grid mapping and A* planning research pipeline
 - Fail-safe `STOP` / `DEGRADED` / `GUIDANCE_AVAILABLE` state output
-- OpenVINO/TensorRT export utilities
+- Optional OpenVINO acceleration/export support
 - Non-root Docker runtime with local-secret build exclusions
 - Deterministic lightweight CI tests plus opt-in full integration smoke tests
 
@@ -31,11 +31,19 @@ WVAB is an offline-first computer-vision assistance platform for blind and low-v
 - Local camera, smartphone stream, or ESP32-CAM
 - A local YOLO model for offline use
 
+Base runtime:
+
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-Runtime dependency versions are bounded to compatible major versions. Lightweight CI dependencies are exactly pinned in `requirements-ci.txt`.
+OpenVINO is intentionally not part of the default edge install. Install accelerator support only on a compatible host that needs it:
+
+```bash
+python -m pip install -r requirements-accelerators.txt
+```
+
+`setup.cfg` is the canonical package metadata source; `pyproject.toml` only defines the build backend and pytest configuration. CI also builds/installs the package without dependencies to catch metadata regressions.
 
 ## Model provisioning
 
@@ -171,6 +179,11 @@ bash deployment/rpi/wvab_edge_start.sh
 python train_navigation_model.py train --data training/wvab_custom.yaml --model yolov8n.pt --epochs 80 --device 0
 python train_navigation_model.py val --model runs/wvab/navigation/weights/best.pt --data training/wvab_custom.yaml
 python train_navigation_model.py export --model runs/wvab/navigation/weights/best.pt --format onnx
+```
+
+For OpenVINO export/runtime support, install `requirements-accelerators.txt` first, then run:
+
+```bash
 python export_accelerated_models.py
 ```
 
@@ -193,7 +206,7 @@ Full runtime smoke import is opt-in because it requires heavyweight ML/device de
 WVAB_FULL_SMOKE=1 python -m pytest tests/test_smoke.py -q
 ```
 
-GitHub Actions runs core tests on Python 3.10, 3.11, and 3.12, validates shell/tool syntax, rejects tracked cache/build/log/secret artifacts, and rejects known insecure deployment defaults.
+GitHub Actions runs core tests on Python 3.10, 3.11, and 3.12, validates package metadata/shell/tool syntax, rejects tracked cache/build/log/secret artifacts, and rejects known insecure deployment defaults.
 
 ## Repository hygiene
 

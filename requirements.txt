@@ -1,5 +1,5 @@
-# Runtime dependencies are bounded to compatible major versions.
-# CI uses requirements-ci.txt for deterministic lightweight validation.
+# Base WVAB runtime dependencies. Keep optional accelerator SDKs out of the
+# default edge install; see requirements-accelerators.txt.
 
 # Computer Vision and Machine Learning
 opencv-python>=4.8,<5
@@ -24,8 +24,6 @@ psutil>=5.9,<8
 # Security / Realtime Control
 pycryptodome>=3.20,<4
 websockets>=12,<16
-paho-mqtt>=2,<3
 
-# Accelerated Inference / Metrics
-openvino>=2024,<2027
+# Metrics
 prometheus-client>=0.20,<1

@@ -2,16 +2,8 @@
 requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[project]
-name = "wvab-system"
-version = "1.0.1"
-description = "Wireless Vision-Aid for the Blind (WVAB)"
-authors = [
-  { name = "Md. Shahanur Islam Shagor" }
-]
-readme = "Readme.md"
-requires-python = ">=3.10"
-license = { text = "MIT" }
+# Package metadata and runtime dependencies live in setup.cfg. Keeping PEP 621
+# metadata out of this file avoids two competing sources of package metadata.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
