@@ -1,64 +1,99 @@
-# --------------------------------------------------------------------------------------------- # 
-# | Name: Md. Shahanur Islam Shagor                                                           | # 
-# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
-# | Voronezh State University of Forestry and Technologies                                    | # 
-# | Build for Blind people within 15$                                                         | # 
-# --------------------------------------------------------------------------------------------- # 
+#!/usr/bin/env python3
+"""Reproducible WVAB YOLO training, validation, and export CLI."""
 
-"""
-WVAB YOLO training utility with multilingual label support.
-
-Examples:
-  Train:
-    python train_navigation_model.py train --data data/wvab.yaml --model yolov8n.pt --epochs 80
-
-  Validate:
-    python train_navigation_model.py val --model runs/wvab/navigation/weights/best.pt --data data/wvab.yaml
-
-  Export:
-    python train_navigation_model.py export --model runs/wvab/navigation/weights/best.pt --format onnx
-"""
+from __future__ import annotations
 
 import argparse
 import json
 import os
-from typing import Dict, Any
+from pathlib import Path
+from typing import Any
 
-from ultralytics import YOLO
+from offline_utils import configure_offline_env, ensure_local_model
+from training.runtime_validation import (
+    require_non_negative,
+    require_positive,
+    validate_dataset_yaml,
+    validate_export_format,
+)
 
 
-def _load_language_map(path: str) -> Dict[str, Any]:
+def _configure_runtime(allow_online: bool) -> bool:
+    if allow_online:
+        os.environ["WVAB_OFFLINE"] = "0"
+    else:
+        os.environ.setdefault("WVAB_OFFLINE", "1")
+    return configure_offline_env()
+
+
+def _load_yolo():
+    from ultralytics import YOLO
+
+    return YOLO
+
+
+def _resolve_model(model_path: str, *, offline: bool) -> str:
+    return ensure_local_model(model_path, offline=offline)
+
+
+def _load_language_map(path: str) -> dict[str, Any]:
     if not path:
         return {}
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.is_file():
+        raise FileNotFoundError(f"language map not found: {resolved}")
+    with resolved.open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError("language map root must be a JSON object")
+    return data
 
 
-def _save_multilingual_labels(model: YOLO, labels_out: str, language_map: Dict[str, Any]) -> None:
+def _save_multilingual_labels(model, labels_out: str, language_map: dict[str, Any]) -> None:
     names = model.names if hasattr(model, "names") else {}
     if isinstance(names, list):
-        names = {i: n for i, n in enumerate(names)}
+        names = {index: name for index, name in enumerate(names)}
 
-    labels = {"classes": {}}
-    for idx, class_name in names.items():
+    labels: dict[str, dict[str, dict[str, str]]] = {"classes": {}}
+    for index, class_name in names.items():
         entry = {"en": str(class_name)}
-        if str(class_name) in language_map:
-            mapped = language_map[str(class_name)]
-            if isinstance(mapped, dict):
-                entry.update(mapped)
-            elif isinstance(mapped, str):
-                entry["custom"] = mapped
-        labels["classes"][str(idx)] = entry
+        mapped = language_map.get(str(class_name))
+        if isinstance(mapped, dict):
+            for language, translation in mapped.items():
+                if isinstance(language, str) and isinstance(translation, str) and translation.strip():
+                    entry[language.strip().lower()] = translation.strip()
+        elif isinstance(mapped, str) and mapped.strip():
+            entry["custom"] = mapped.strip()
+        labels["classes"][str(index)] = entry
 
-    os.makedirs(os.path.dirname(labels_out) or ".", exist_ok=True)
-    with open(labels_out, "w", encoding="utf-8") as f:
-        json.dump(labels, f, ensure_ascii=False, indent=2)
+    output = Path(labels_out).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8") as handle:
+        json.dump(labels, handle, ensure_ascii=False, indent=2)
+
+
+def _validate_common(args: argparse.Namespace) -> None:
+    require_positive("imgsz", args.imgsz)
+    require_positive("batch", args.batch)
 
 
 def run_train(args: argparse.Namespace) -> None:
-    model = YOLO(args.model)
+    _validate_common(args)
+    require_positive("epochs", args.epochs)
+    require_non_negative("workers", args.workers)
+    require_non_negative("patience", args.patience)
+    require_positive("lr0", args.lr0)
+    require_non_negative("freeze", args.freeze)
+    if args.save_period < -1:
+        raise ValueError("save-period must be -1 or >= 0")
+
+    validate_dataset_yaml(args.data, require_train=True)
+    offline = _configure_runtime(args.allow_online)
+    model_path = _resolve_model(args.model, offline=offline)
+    YOLO = _load_yolo()
+    model = YOLO(model_path)
     model.train(
-        data=args.data,
+        data=str(Path(args.data).expanduser().resolve()),
         epochs=args.epochs,
         imgsz=args.imgsz,
         batch=args.batch,
@@ -74,84 +109,108 @@ def run_train(args: argparse.Namespace) -> None:
         amp=args.amp,
         save_period=args.save_period,
         resume=args.resume,
+        seed=args.seed,
+        deterministic=args.deterministic,
     )
 
-    best_model_path = os.path.join(args.project, args.name, "weights", "best.pt")
-    trained_model = YOLO(best_model_path if os.path.exists(best_model_path) else args.model)
-    lang_map = _load_language_map(args.language_map)
-    _save_multilingual_labels(trained_model, args.labels_out, lang_map)
+    best_model_path = Path(args.project) / args.name / "weights" / "best.pt"
+    if not best_model_path.exists():
+        raise RuntimeError(f"training finished without expected best checkpoint: {best_model_path}")
 
-    print("=" * 60)
+    trained_model = YOLO(str(best_model_path.resolve()))
+    language_map = _load_language_map(args.language_map)
+    _save_multilingual_labels(trained_model, args.labels_out, language_map)
+
     print("Training complete")
-    print(f"Best model: {best_model_path}")
-    print(f"Multilingual labels: {args.labels_out}")
-    print("=" * 60)
+    print(f"Best model: {best_model_path.resolve()}")
+    print(f"Multilingual labels: {Path(args.labels_out).expanduser().resolve()}")
 
 
 def run_val(args: argparse.Namespace) -> None:
-    model = YOLO(args.model)
-    metrics = model.val(data=args.data, imgsz=args.imgsz, batch=args.batch, device=args.device)
-    print("=" * 60)
+    _validate_common(args)
+    validate_dataset_yaml(args.data, require_train=False)
+    offline = _configure_runtime(args.allow_online)
+    model_path = _resolve_model(args.model, offline=offline)
+    YOLO = _load_yolo()
+    model = YOLO(model_path)
+    metrics = model.val(
+        data=str(Path(args.data).expanduser().resolve()),
+        imgsz=args.imgsz,
+        batch=args.batch,
+        device=args.device,
+    )
     print("Validation complete")
     print(metrics)
-    print("=" * 60)
 
 
 def run_export(args: argparse.Namespace) -> None:
-    model = YOLO(args.model)
-    output = model.export(format=args.format, imgsz=args.imgsz, half=args.half, device=args.device)
-    print("=" * 60)
+    require_positive("imgsz", args.imgsz)
+    export_format = validate_export_format(args.format)
+    offline = _configure_runtime(args.allow_online)
+    model_path = _resolve_model(args.model, offline=offline)
+    YOLO = _load_yolo()
+    model = YOLO(model_path)
+    output = model.export(
+        format=export_format,
+        imgsz=args.imgsz,
+        half=args.half,
+        device=args.device,
+    )
     print("Export complete")
     print(f"Exported: {output}")
-    print("=" * 60)
+
+
+def _add_online_flag(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--allow-online",
+        action="store_true",
+        help="Explicitly allow Ultralytics to use network resources. Offline is the default.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="WVAB YOLO trainer with multilingual support")
+    parser = argparse.ArgumentParser(description="WVAB reproducible YOLO training utility")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    train = sub.add_parser("train", help="Train/fine-tune a model")
-    train.add_argument("--data", required=True, help="Dataset YAML path")
-    train.add_argument("--model", default="yolov8n.pt", help="Base model checkpoint")
-    train.add_argument("--epochs", type=int, default=80, help="Training epochs")
-    train.add_argument("--imgsz", type=int, default=640, help="Image size")
-    train.add_argument("--batch", type=int, default=16, help="Batch size")
+    train = sub.add_parser("train", help="Train/fine-tune a local model")
+    train.add_argument("--data", required=True, help="Local dataset YAML path")
+    train.add_argument("--model", default="yolov8n.pt", help="Local base model checkpoint")
+    train.add_argument("--epochs", type=int, default=80)
+    train.add_argument("--imgsz", type=int, default=640)
+    train.add_argument("--batch", type=int, default=16)
     train.add_argument("--device", default="cpu", help="cpu / 0 / 0,1")
-    train.add_argument("--project", default="runs/wvab", help="Output project directory")
-    train.add_argument("--name", default="navigation", help="Run name")
-    train.add_argument("--workers", type=int, default=4, help="Dataloader workers")
-    train.add_argument("--patience", type=int, default=30, help="Early stopping patience")
-    train.add_argument("--lr0", type=float, default=0.01, help="Initial learning rate")
-    train.add_argument("--optimizer", default="auto", help="Optimizer: auto/SGD/Adam/AdamW")
-    train.add_argument("--freeze", type=int, default=0, help="Freeze first N layers")
-    train.add_argument("--cache", default=False, action="store_true", help="Cache images")
-    train.add_argument("--amp", default=True, action="store_true", help="Mixed precision")
-    train.add_argument("--save-period", type=int, default=-1, help="Checkpoint save period")
-    train.add_argument("--resume", default=False, action="store_true", help="Resume last training")
-    train.add_argument(
-        "--language-map",
-        default="",
-        help="Optional JSON: class_name -> {'bn': '...', 'es': '...'}",
-    )
-    train.add_argument(
-        "--labels-out",
-        default="runs/wvab/multilingual_labels.json",
-        help="Output JSON for multilingual class labels",
-    )
+    train.add_argument("--project", default="runs/wvab")
+    train.add_argument("--name", default="navigation")
+    train.add_argument("--workers", type=int, default=4)
+    train.add_argument("--patience", type=int, default=30)
+    train.add_argument("--lr0", type=float, default=0.01)
+    train.add_argument("--optimizer", default="auto", choices=["auto", "SGD", "Adam", "AdamW"])
+    train.add_argument("--freeze", type=int, default=0)
+    train.add_argument("--cache", action="store_true")
+    train.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
+    train.add_argument("--save-period", type=int, default=-1)
+    train.add_argument("--resume", action="store_true")
+    train.add_argument("--seed", type=int, default=42)
+    train.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=True)
+    train.add_argument("--language-map", default="", help="Optional local JSON translation map")
+    train.add_argument("--labels-out", default="runs/wvab/multilingual_labels.json")
+    _add_online_flag(train)
 
-    val = sub.add_parser("val", help="Validate a model")
-    val.add_argument("--model", required=True, help="Model path to validate")
-    val.add_argument("--data", required=True, help="Dataset YAML path")
-    val.add_argument("--imgsz", type=int, default=640, help="Image size")
-    val.add_argument("--batch", type=int, default=16, help="Batch size")
-    val.add_argument("--device", default="cpu", help="cpu / 0 / 0,1")
+    val = sub.add_parser("val", help="Validate a local model")
+    val.add_argument("--model", required=True)
+    val.add_argument("--data", required=True)
+    val.add_argument("--imgsz", type=int, default=640)
+    val.add_argument("--batch", type=int, default=16)
+    val.add_argument("--device", default="cpu")
+    _add_online_flag(val)
 
-    export = sub.add_parser("export", help="Export model")
-    export.add_argument("--model", required=True, help="Model path to export")
-    export.add_argument("--format", default="onnx", help="Export format (onnx/engine/openvino/...)")
-    export.add_argument("--imgsz", type=int, default=640, help="Image size")
-    export.add_argument("--half", default=False, action="store_true", help="FP16 export when supported")
-    export.add_argument("--device", default="cpu", help="cpu / 0")
+    export = sub.add_parser("export", help="Export a local model")
+    export.add_argument("--model", required=True)
+    export.add_argument("--format", default="onnx", choices=["onnx", "openvino", "engine"])
+    export.add_argument("--imgsz", type=int, default=640)
+    export.add_argument("--half", action="store_true")
+    export.add_argument("--device", default="cpu")
+    _add_online_flag(export)
 
     return parser
 
@@ -159,15 +218,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-
-    if args.command == "train":
-        run_train(args)
-    elif args.command == "val":
-        run_val(args)
-    elif args.command == "export":
-        run_export(args)
-    else:
-        parser.error("Unknown command")
+    try:
+        if args.command == "train":
+            run_train(args)
+        elif args.command == "val":
+            run_val(args)
+        elif args.command == "export":
+            run_export(args)
+        else:
+            parser.error("unknown command")
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        parser.exit(2, f"ERROR: {exc}\n")
 
 
 if __name__ == "__main__":
