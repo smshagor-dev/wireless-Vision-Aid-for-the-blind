@@ -19,6 +19,8 @@ Run diagnostics before enabling the service:
 python test_system.py
 ```
 
+Keep the project `.venv` in place. The systemd installer deliberately binds the service to `.venv/bin/python` so reboot/service startup uses the same dependencies that were validated interactively.
+
 ## 2. Generate paired device credentials
 
 Do not put Wi-Fi passwords, UDP tokens, or AES keys in committed source files. Generate a matching ESP32 header and Raspberry Pi environment file locally:
@@ -48,9 +50,9 @@ python tools/generate_device_secrets.py \
 
 Open `esp32_cam_stream.ino` in Arduino IDE with `esp32_secrets.h` beside it. Select the AI Thinker ESP32-CAM board and flash the firmware from the same compatible source revision as the Raspberry Pi server.
 
-The supported firmware is secure-UDP-only. It validates non-placeholder secrets, sends encrypted authentication packets, refreshes authentication while streaming, and encrypts every video chunk with AES-GCM. Every encrypted datagram carries a 96-bit frame nonce, and the full 10-byte UDP protocol header is authenticated as GCM Additional Authenticated Data (AAD), so changing frame/chunk metadata invalidates the packet.
+The supported firmware is secure-UDP-only. It validates non-placeholder secrets, creates a fresh non-zero session ID at boot, sends encrypted authentication packets, refreshes authentication while streaming, and encrypts every video chunk with AES-GCM. Every encrypted datagram carries a 96-bit frame nonce, and the full 14-byte UDP header—including the session ID—is authenticated as GCM Additional Authenticated Data (AAD), so changing session/frame/chunk metadata invalidates the packet.
 
-The server also rejects repeated authentication nonces during the authentication TTL, rejects completed-frame replay/out-of-order serials with wrap-aware comparison, and bounds chunk count, reconstructed frame size, and per-client in-flight frames. See `SECURE_UDP_PROTOCOL.md` for the packet contract.
+A new authenticated session retires the old session for that sender, allowing a rebooted ESP32 to restart its frame counter at zero without disabling replay protection. Authentication refresh within one session does not reset frame replay state. The server also rejects replayed authentication nonces from its bounded process-lifetime cache, rejects completed-frame replay/out-of-order serials with wrap-aware comparison, and bounds chunk count, reconstructed frame size, authenticated-client state, and per-client/session in-flight frames. See `SECURE_UDP_PROTOCOL.md` for the packet contract.
 
 The release ESP32 firmware intentionally has no unauthenticated MJPEG fallback. For a trusted local/IP camera experiment, use `vision_server.py` instead of weakening the wearable transport.
 
@@ -60,24 +62,24 @@ The release ESP32 firmware intentionally has no unauthenticated MJPEG fallback. 
 bash deployment/rpi/wvab_edge_start.sh
 ```
 
-The launcher refuses to start when the credential file is missing, authentication/encryption is disabled, the token is too short, the AES key is malformed, or the YOLO model is missing.
+The launcher refuses to start when the credential file is missing, authentication/encryption is disabled, the token is too short, the AES key is malformed, the Python runtime is older than 3.10, or the YOLO model is missing.
 
 ## 5. Optional systemd service
 
-The repository does not use a hard-coded `/home/pi/...` service. Install one rendered for the current checkout/user:
+The repository does not use a hard-coded `/home/pi/...` service. Install one rendered for the current checkout/user and project virtualenv:
 
 ```bash
 sudo bash deployment/rpi/install_service.sh
 ```
 
-Then inspect it:
+The installer refuses to continue if `.venv/bin/python` is missing or older than Python 3.10. Then inspect the service:
 
 ```bash
 systemctl status wvab_edge.service
 journalctl -u wvab_edge.service -f
 ```
 
-The generated service uses `NoNewPrivileges`, a private `/tmp`, a read-only system view, and only grants write access to the WVAB checkout.
+The generated service uses `NoNewPrivileges`, a private `/tmp`, a read-only system view, the project virtualenv interpreter, and only grants write access to the WVAB checkout.
 
 ## 6. Containerized headless server
 
@@ -89,7 +91,7 @@ docker compose build
 docker compose up -d udp-vision-server
 ```
 
-The image runs as an unprivileged `wvab` user. The default service exposes only UDP port 9999 and disables TTS and WebSocket control inside the container.
+The image runs as an unprivileged `wvab` user. The default service exposes only UDP port 9999, disables TTS and WebSocket control inside the container, and uses the completed-frame watchdog. Its health check requires both a fresh health record and a recently completed/decodeable video frame.
 
 The optional navigation profile requires Linux camera-device access:
 
@@ -110,7 +112,7 @@ python udp_streaming.py server --config wvab_config.sample.json
 python udp_streaming.py client --config wvab_config.sample.json --server-ip 127.0.0.1 --camera 0
 ```
 
-Python sender/server use the same authenticated-header and replay-aware packet contract as the ESP32 path. Old packet formats are not compatibility targets after the security hardening.
+Python sender/server use the same authenticated-header, session-aware, replay-aware packet contract as the ESP32 path. Old packet formats are not compatibility targets after the security hardening.
 
 For a smartphone/IP camera, pass the trusted local stream URL to `vision_server.py` / `smartphone_camera.py`. Do not expose camera feeds or the UDP/control ports directly to the public Internet.
 
@@ -133,6 +135,7 @@ At minimum capture evidence for:
 - 8+ hour soak behavior and memory/thermal trends,
 - camera/network/TTS dropout and recovery,
 - malformed/incomplete/replayed UDP handling,
+- ESP32/Python sender reboot and session rotation,
 - AES-GCM header-tamper rejection and authentication replay rejection,
 - authenticated/encrypted transport verification,
 - model accuracy on representative mobility hazards,
