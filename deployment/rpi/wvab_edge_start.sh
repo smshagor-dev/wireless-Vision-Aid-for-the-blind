@@ -5,22 +5,23 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 ENV_FILE="${WVAB_EDGE_ENV_FILE:-$ROOT_DIR/deployment/rpi/wvab_edge.env}"
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "ERROR: missing $ENV_FILE" >&2
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+elif [[ -z "${WVAB_UDP_TOKEN:-}" || -z "${WVAB_UDP_KEY_HEX:-}" ]]; then
+  echo "ERROR: missing $ENV_FILE and secure UDP credentials are not preloaded in the environment." >&2
   echo "Generate credentials with: python3 tools/generate_device_secrets.py" >&2
   exit 2
 fi
-
-set -a
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
 
 export WVAB_OFFLINE="${WVAB_OFFLINE:-1}"
 export WVAB_ALLOW_INSECURE_UDP=0
 
 UDP_TOKEN="${WVAB_UDP_TOKEN:-}"
 WS_TOKEN="${WVAB_WS_TOKEN:-}"
+UDP_PORT="${WVAB_UDP_PORT:-9999}"
 if [[ "${WVAB_UDP_AUTH:-}" != "1" || "${WVAB_UDP_ENCRYPT:-}" != "1" ]]; then
   echo "ERROR: WVAB edge deployment requires UDP authentication and encryption." >&2
   exit 2
@@ -31,6 +32,10 @@ if (( ${#UDP_TOKEN} < 16 )); then
 fi
 if [[ ! "${WVAB_UDP_KEY_HEX:-}" =~ ^([0-9A-Fa-f]{32}|[0-9A-Fa-f]{48}|[0-9A-Fa-f]{64})$ ]]; then
   echo "ERROR: WVAB_UDP_KEY_HEX must contain a 16, 24, or 32-byte hexadecimal key." >&2
+  exit 2
+fi
+if [[ ! "$UDP_PORT" =~ ^[0-9]+$ ]] || (( UDP_PORT < 1 || UDP_PORT > 65535 )); then
+  echo "ERROR: WVAB_UDP_PORT must be an integer in 1..65535." >&2
   exit 2
 fi
 if [[ "${WVAB_WS_CONTROL:-1}" == "1" && "${WVAB_WS_CONTROL_HOST:-127.0.0.1}" != "127.0.0.1" ]] && (( ${#WS_TOKEN} < 16 )); then
@@ -60,7 +65,7 @@ fi
 
 exec "$PYTHON_BIN" udp_streaming.py server \
   --host "${WVAB_UDP_BIND_HOST:-0.0.0.0}" \
-  --port "${WVAB_UDP_PORT:-9999}" \
+  --port "$UDP_PORT" \
   --model "$MODEL_PATH" \
   --language "${WVAB_LANGUAGE:-en}" \
   --headless \
