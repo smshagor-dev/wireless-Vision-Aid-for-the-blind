@@ -13,6 +13,7 @@ import '../../core/transport/udp_replay_store.dart';
 import '../../core/vision/camera_tensor_preprocessor.dart';
 import '../../core/vision/detection.dart';
 import '../../core/vision/jpeg_tensor_preprocessor.dart';
+import '../../core/vision/vision_input.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key, required this.controller});
@@ -153,8 +154,8 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   Future<void> _processPhoneFrame(CameraImage image, int rotationDegrees) async {
     if (!_canProcessFrame()) return;
     try {
-      final tensor = _phonePreprocessor.preprocess(image, rotationDegrees: rotationDegrees);
-      await _runInference(tensor);
+      final prepared = _phonePreprocessor.preprocess(image, rotationDegrees: rotationDegrees);
+      await _runInference(prepared);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -165,8 +166,8 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   Future<void> _processEsp32Frame(Uint8List jpeg) async {
     if (!_canProcessFrame()) return;
     try {
-      final tensor = _jpegPreprocessor.preprocess(jpeg);
-      await _runInference(tensor);
+      final prepared = _jpegPreprocessor.preprocess(jpeg);
+      await _runInference(prepared);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -174,8 +175,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     }
   }
 
-  Future<void> _runInference(Float32List tensor) async {
-    final result = await widget.controller.processTensor(tensor);
+  Future<void> _runInference(PreparedVisionInput prepared) async {
+    final result = await widget.controller.processTensor(
+      prepared.tensor,
+      transform: prepared.transform,
+    );
     if (!mounted) return;
     setState(() {
       _detections = result.detections;
@@ -254,9 +258,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     final standalone = widget.controller.standaloneStrings;
     final camera = _cameraController;
     final sourceLabel = _usingPhone ? standalone.get('phoneCamera') : standalone.get('esp32Camera');
-    final sourceActive = _usingPhone
-        ? camera != null && camera.value.isInitialized
-        : _esp32Authenticated;
+    final sourceActive = _usingPhone ? camera != null && camera.value.isInitialized : _esp32Authenticated;
     final runtimeReady = widget.controller.runtimeState == LocalRuntimeState.ready;
     final primaryDetection = _detections.isEmpty ? null : _detections.first;
     final proximity = primaryDetection == null ? null : classifyRelativeProximity(primaryDetection.box);
@@ -331,8 +333,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                       ),
                       child: Row(
                         children: [
-                          Icon(runtimeReady ? Icons.memory_rounded : Icons.shield_outlined,
-                              color: runtimeReady ? AppTheme.greenBorder : const Color(0xFFFF5252), size: 27),
+                          Icon(
+                            runtimeReady ? Icons.memory_rounded : Icons.shield_outlined,
+                            color: runtimeReady ? AppTheme.greenBorder : const Color(0xFFFF5252),
+                            size: 27,
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
@@ -342,7 +347,12 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                                       : standalone.guidanceMessage(primaryDetection.label, proximity!)),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700, height: 1.3),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                height: 1.3,
+                              ),
                             ),
                           ),
                         ],
@@ -351,9 +361,21 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                     const SizedBox(height: 12),
                     Row(
                       children: [
-                        Expanded(child: _InfoChip(icon: _usingPhone ? Icons.smartphone_rounded : Icons.wifi_tethering_rounded, label: standalone.get('cameraSource'), value: sourceLabel)),
+                        Expanded(
+                          child: _InfoChip(
+                            icon: _usingPhone ? Icons.smartphone_rounded : Icons.wifi_tethering_rounded,
+                            label: standalone.get('cameraSource'),
+                            value: sourceLabel,
+                          ),
+                        ),
                         const SizedBox(width: 10),
-                        Expanded(child: _InfoChip(icon: Icons.center_focus_strong_rounded, label: strings.get('detection'), value: '${_detections.length}')),
+                        Expanded(
+                          child: _InfoChip(
+                            icon: Icons.center_focus_strong_rounded,
+                            label: strings.get('detection'),
+                            value: '${_detections.length}',
+                          ),
+                        ),
                       ],
                     ),
                     const Spacer(),
@@ -396,7 +418,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const SizedBox(width: 34, height: 34, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3)),
+          const SizedBox(
+            width: 34,
+            height: 34,
+            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+          ),
           const SizedBox(height: 14),
           Text(loadingText, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
         ],
@@ -410,9 +436,17 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
           children: [
             const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 52),
             const SizedBox(height: 14),
-            Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 18),
-            OutlinedButton(onPressed: _startSelectedSource, style: OutlinedButton.styleFrom(foregroundColor: Colors.white), child: const Text('Retry')),
+            OutlinedButton(
+              onPressed: _startSelectedSource,
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+              child: const Text('Retry'),
+            ),
           ],
         ),
       );
@@ -424,13 +458,17 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     if (!_usingPhone && jpeg != null) {
       return Image.memory(jpeg, fit: BoxFit.cover, gaplessPlayback: true);
     }
-    return Text(_usingPhone ? 'Camera unavailable' : 'Waiting for authenticated ESP32-CAM frames…',
-        textAlign: TextAlign.center, style: const TextStyle(color: Colors.white));
+    return Text(
+      _usingPhone ? 'Camera unavailable' : 'Waiting for authenticated ESP32-CAM frames…',
+      textAlign: TextAlign.center,
+      style: const TextStyle(color: Colors.white),
+    );
   }
 }
 
 class _HudBadge extends StatelessWidget {
   const _HudBadge({super.key, required this.text, this.leadingColor});
+
   final String text;
   final Color? leadingColor;
 
@@ -446,7 +484,11 @@ class _HudBadge extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (leadingColor != null) ...[
-              Container(width: 8, height: 8, decoration: BoxDecoration(color: leadingColor, shape: BoxShape.circle)),
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: leadingColor, shape: BoxShape.circle),
+              ),
               const SizedBox(width: 7),
             ],
             Text(text, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800)),
@@ -457,6 +499,7 @@ class _HudBadge extends StatelessWidget {
 
 class _InfoChip extends StatelessWidget {
   const _InfoChip({required this.icon, required this.label, required this.value});
+
   final IconData icon;
   final String label;
   final String value;
@@ -479,9 +522,17 @@ class _InfoChip extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label, style: const TextStyle(color: Color(0xFF8EA2C9), fontSize: 11, fontWeight: FontWeight.w600)),
+                  Text(
+                    label,
+                    style: const TextStyle(color: Color(0xFF8EA2C9), fontSize: 11, fontWeight: FontWeight.w600),
+                  ),
                   const SizedBox(height: 1),
-                  Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800)),
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800),
+                  ),
                 ],
               ),
             ),
@@ -500,6 +551,7 @@ class _RoundAction extends StatelessWidget {
     this.active = false,
     this.disabled = false,
   });
+
   final IconData icon;
   final String label;
   final VoidCallback onTap;
