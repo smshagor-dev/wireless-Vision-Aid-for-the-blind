@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart' show Key;
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wvab_mobile/app.dart';
 import 'package:wvab_mobile/core/controllers/app_controller.dart';
@@ -51,6 +51,10 @@ void main() {
     expect(find.text('WVAB Mobile'), findsOneWidget);
     expect(find.byKey(const Key('start-assistance-button')), findsOneWidget);
     expect(find.textContaining('transport not connected yet'), findsOneWidget);
+
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pumpAndSettle();
+
     expect(find.textContaining('Protocol v2 integration pending'), findsOneWidget);
   });
 
