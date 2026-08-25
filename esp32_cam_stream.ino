@@ -2,7 +2,6 @@
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include "esp_http_server.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "mbedtls/gcm.h"
@@ -13,9 +12,12 @@
 #include "esp32_secrets.example.h"
 #endif
 
-// Secure UDP is the supported deployment path. The MJPEG server below is a
-// local development fallback only and is intentionally disabled by default.
-#define USE_SECURE_UDP true
+// WVAB ESP32-CAM secure transport.
+// Packet header (network byte order):
+//   frame_id:uint32 | total_chunks:uint16 | chunk_index:uint16 | payload_size:uint16
+// Every encrypted packet carries: base_nonce[12] | GCM tag[16] | ciphertext.
+// The complete 10-byte header is authenticated as AES-GCM AAD.
+
 #define TARGET_FPS 12
 #define MIN_FRAME_INTERVAL_MS (1000 / TARGET_FPS)
 #define WIFI_POWER_SAVE true
@@ -26,11 +28,12 @@ const uint16_t MAX_UDP_PAYLOAD = 1450;
 const uint16_t HEADER_SIZE = 10;
 const uint16_t NONCE_SIZE = 12;
 const uint16_t TAG_SIZE = 16;
+const uint16_t MAX_FRAME_CHUNKS = 1024;
 const uint32_t AUTH_FRAME_ID = 0xFFFFFFFFu;
+const uint32_t MAX_DATA_FRAME_ID = 0xFFFFFFFEu;
 
 WiFiUDP udp;
 uint32_t frame_id = 0;
-httpd_handle_t stream_httpd = NULL;
 
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
@@ -77,6 +80,8 @@ static void validate_secrets() {
   if (key_is_all_zero()) halt_with_error("refusing all-zero AES key");
   if (strlen(WVAB_UDP_TOKEN) < 16) halt_with_error("UDP token must be at least 16 characters");
   if (strlen(WVAB_UDP_HOST) == 0) halt_with_error("UDP host is empty");
+  if (WVAB_UDP_PORT <= 0 || WVAB_UDP_PORT > 65535) halt_with_error("UDP port is invalid");
+
   if (WVAB_USE_AP_MODE) {
     if (strlen(WVAB_AP_SSID) == 0 || strlen(WVAB_AP_PASSWORD) < 8) {
       halt_with_error("AP SSID/password is invalid");
@@ -86,29 +91,44 @@ static void validate_secrets() {
   }
 }
 
-static void write_u32(uint8_t* buf, uint32_t v) {
-  buf[0] = (v >> 24) & 0xFF;
-  buf[1] = (v >> 16) & 0xFF;
-  buf[2] = (v >> 8) & 0xFF;
-  buf[3] = v & 0xFF;
+static void write_u32(uint8_t* buf, uint32_t value) {
+  buf[0] = (value >> 24) & 0xFF;
+  buf[1] = (value >> 16) & 0xFF;
+  buf[2] = (value >> 8) & 0xFF;
+  buf[3] = value & 0xFF;
 }
 
-static void write_u16(uint8_t* buf, uint16_t v) {
-  buf[0] = (v >> 8) & 0xFF;
-  buf[1] = v & 0xFF;
+static void write_u16(uint8_t* buf, uint16_t value) {
+  buf[0] = (value >> 8) & 0xFF;
+  buf[1] = value & 0xFF;
 }
 
-static void derive_nonce(const uint8_t base_nonce[NONCE_SIZE], uint16_t chunk_index, uint8_t nonce[NONCE_SIZE]) {
+static void build_header(
+    uint8_t header[HEADER_SIZE],
+    uint32_t current_frame_id,
+    uint16_t total_chunks,
+    uint16_t chunk_index,
+    uint16_t payload_size) {
+  write_u32(header, current_frame_id);
+  write_u16(header + 4, total_chunks);
+  write_u16(header + 6, chunk_index);
+  write_u16(header + 8, payload_size);
+}
+
+static void derive_nonce(
+    const uint8_t base_nonce[NONCE_SIZE],
+    uint16_t chunk_index,
+    uint8_t nonce[NONCE_SIZE]) {
   memcpy(nonce, base_nonce, NONCE_SIZE);
-  uint32_t ctr = (uint32_t(nonce[8]) << 24) |
-                 (uint32_t(nonce[9]) << 16) |
-                 (uint32_t(nonce[10]) << 8) |
-                 uint32_t(nonce[11]);
-  ctr += chunk_index;
-  nonce[8] = (ctr >> 24) & 0xFF;
-  nonce[9] = (ctr >> 16) & 0xFF;
-  nonce[10] = (ctr >> 8) & 0xFF;
-  nonce[11] = ctr & 0xFF;
+  uint32_t counter = (uint32_t(nonce[8]) << 24) |
+                     (uint32_t(nonce[9]) << 16) |
+                     (uint32_t(nonce[10]) << 8) |
+                     uint32_t(nonce[11]);
+  counter += chunk_index;
+  nonce[8] = (counter >> 24) & 0xFF;
+  nonce[9] = (counter >> 16) & 0xFF;
+  nonce[10] = (counter >> 8) & 0xFF;
+  nonce[11] = counter & 0xFF;
 }
 
 static bool init_gcm(mbedtls_gcm_context* ctx) {
@@ -126,24 +146,45 @@ static bool init_gcm(mbedtls_gcm_context* ctx) {
   return true;
 }
 
+static bool send_packet(
+    const uint8_t header[HEADER_SIZE],
+    const uint8_t base_nonce[NONCE_SIZE],
+    const uint8_t tag[TAG_SIZE],
+    const uint8_t* ciphertext,
+    size_t ciphertext_len) {
+  if (!udp.beginPacket(WVAB_UDP_HOST, WVAB_UDP_PORT)) return false;
+  udp.write(header, HEADER_SIZE);
+  udp.write(base_nonce, NONCE_SIZE);
+  udp.write(tag, TAG_SIZE);
+  if (ciphertext_len > 0) udp.write(ciphertext, ciphertext_len);
+  return udp.endPacket() == 1;
+}
+
 static bool send_auth_packet() {
   const size_t token_len = strlen(WVAB_UDP_TOKEN);
-  if (token_len == 0 || token_len > 256) return false;
+  if (token_len < 16 || token_len > 256) return false;
+
+  const uint16_t payload_len = static_cast<uint16_t>(NONCE_SIZE + TAG_SIZE + token_len);
+  uint8_t header[HEADER_SIZE];
+  build_header(header, AUTH_FRAME_ID, 0, 0, payload_len);
+
+  uint8_t base_nonce[NONCE_SIZE];
+  esp_fill_random(base_nonce, sizeof(base_nonce));
+  uint8_t nonce[NONCE_SIZE];
+  derive_nonce(base_nonce, 0, nonce);
+  uint8_t ciphertext[256];
+  uint8_t tag[TAG_SIZE];
 
   mbedtls_gcm_context ctx;
   if (!init_gcm(&ctx)) return false;
-  uint8_t base_nonce[NONCE_SIZE];
-  esp_fill_random(base_nonce, sizeof(base_nonce));
-  uint8_t ciphertext[256];
-  uint8_t tag[TAG_SIZE];
   const int rc = mbedtls_gcm_crypt_and_tag(
       &ctx,
       MBEDTLS_GCM_ENCRYPT,
       token_len,
-      base_nonce,
+      nonce,
       NONCE_SIZE,
-      NULL,
-      0,
+      header,
+      HEADER_SIZE,
       reinterpret_cast<const uint8_t*>(WVAB_UDP_TOKEN),
       ciphertext,
       TAG_SIZE,
@@ -153,33 +194,28 @@ static bool send_auth_packet() {
     Serial.printf("Auth encryption failed: %d\n", rc);
     return false;
   }
-
-  const uint16_t payload_len = static_cast<uint16_t>(NONCE_SIZE + TAG_SIZE + token_len);
-  uint8_t header[HEADER_SIZE];
-  write_u32(header, AUTH_FRAME_ID);
-  write_u16(header + 4, 0);
-  write_u16(header + 6, 0);
-  write_u16(header + 8, payload_len);
-  if (!udp.beginPacket(WVAB_UDP_HOST, WVAB_UDP_PORT)) return false;
-  udp.write(header, HEADER_SIZE);
-  udp.write(base_nonce, NONCE_SIZE);
-  udp.write(tag, TAG_SIZE);
-  udp.write(ciphertext, token_len);
-  return udp.endPacket() == 1;
+  return send_packet(header, base_nonce, tag, ciphertext, token_len);
 }
 
 static bool send_udp_frame(camera_fb_t* fb) {
   if (!fb || !fb->buf || fb->len == 0) return false;
+
   const uint16_t max_plain = MAX_UDP_PAYLOAD - HEADER_SIZE - NONCE_SIZE - TAG_SIZE;
   const size_t chunk_count = (fb->len + max_plain - 1) / max_plain;
-  if (chunk_count == 0 || chunk_count > 65535) return false;
+  if (chunk_count == 0 || chunk_count > MAX_FRAME_CHUNKS) {
+    Serial.printf("Dropping oversized frame: %u bytes, %u chunks\n",
+                  static_cast<unsigned int>(fb->len),
+                  static_cast<unsigned int>(chunk_count));
+    return false;
+  }
   const uint16_t total_chunks = static_cast<uint16_t>(chunk_count);
 
-  mbedtls_gcm_context ctx;
-  if (!init_gcm(&ctx)) return false;
   uint8_t base_nonce[NONCE_SIZE];
   esp_fill_random(base_nonce, sizeof(base_nonce));
   uint8_t ciphertext[MAX_UDP_PAYLOAD];
+
+  mbedtls_gcm_context ctx;
+  if (!init_gcm(&ctx)) return false;
   bool success = true;
 
   for (uint16_t chunk_index = 0; chunk_index < total_chunks; ++chunk_index) {
@@ -187,6 +223,11 @@ static bool send_udp_frame(camera_fb_t* fb) {
     size_t end = start + max_plain;
     if (end > fb->len) end = fb->len;
     const uint16_t plain_len = static_cast<uint16_t>(end - start);
+    const uint16_t payload_len = static_cast<uint16_t>(NONCE_SIZE + TAG_SIZE + plain_len);
+
+    uint8_t header[HEADER_SIZE];
+    build_header(header, frame_id, total_chunks, chunk_index, payload_len);
+
     uint8_t nonce[NONCE_SIZE];
     derive_nonce(base_nonce, chunk_index, nonce);
     uint8_t tag[TAG_SIZE];
@@ -196,8 +237,8 @@ static bool send_udp_frame(camera_fb_t* fb) {
         plain_len,
         nonce,
         NONCE_SIZE,
-        NULL,
-        0,
+        header,
+        HEADER_SIZE,
         fb->buf + start,
         ciphertext,
         TAG_SIZE,
@@ -208,73 +249,19 @@ static bool send_udp_frame(camera_fb_t* fb) {
       break;
     }
 
-    uint16_t payload_len = static_cast<uint16_t>(TAG_SIZE + plain_len);
-    if (chunk_index == 0) payload_len = static_cast<uint16_t>(NONCE_SIZE + payload_len);
-    uint8_t header[HEADER_SIZE];
-    write_u32(header, frame_id);
-    write_u16(header + 4, total_chunks);
-    write_u16(header + 6, chunk_index);
-    write_u16(header + 8, payload_len);
-    if (!udp.beginPacket(WVAB_UDP_HOST, WVAB_UDP_PORT)) {
-      success = false;
-      break;
-    }
-    udp.write(header, HEADER_SIZE);
-    if (chunk_index == 0) udp.write(base_nonce, NONCE_SIZE);
-    udp.write(tag, TAG_SIZE);
-    udp.write(ciphertext, plain_len);
-    if (udp.endPacket() != 1) {
+    if (!send_packet(header, base_nonce, tag, ciphertext, plain_len)) {
       success = false;
       break;
     }
   }
 
   mbedtls_gcm_free(&ctx);
-  ++frame_id;
-  if (frame_id == AUTH_FRAME_ID) frame_id = 0;
-  return success;
-}
-
-// Development-only MJPEG fallback. It is unauthenticated and should not be
-// exposed on untrusted networks.
-static esp_err_t stream_handler(httpd_req_t* req) {
-  esp_err_t res = httpd_resp_set_type(req, "multipart/x-mixed-replace; boundary=frame");
-  if (res != ESP_OK) return res;
-  while (true) {
-    camera_fb_t* fb = esp_camera_fb_get();
-    if (!fb) return ESP_FAIL;
-    if (fb->format != PIXFORMAT_JPEG) {
-      esp_camera_fb_return(fb);
-      return ESP_ERR_NOT_SUPPORTED;
-    }
-    char header[96];
-    const int header_len = snprintf(
-        header,
-        sizeof(header),
-        "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n",
-        static_cast<unsigned int>(fb->len));
-    res = httpd_resp_send_chunk(req, header, header_len);
-    if (res == ESP_OK) res = httpd_resp_send_chunk(req, reinterpret_cast<const char*>(fb->buf), fb->len);
-    if (res == ESP_OK) res = httpd_resp_send_chunk(req, "\r\n--frame\r\n", 13);
-    esp_camera_fb_return(fb);
-    if (res != ESP_OK) return res;
-  }
-}
-
-static void startCameraServer() {
-  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.server_port = 81;
-  httpd_uri_t stream_uri = {};
-  stream_uri.uri = "/stream";
-  stream_uri.method = HTTP_GET;
-  stream_uri.handler = stream_handler;
-  stream_uri.user_ctx = NULL;
-  if (httpd_start(&stream_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(stream_httpd, &stream_uri);
-    Serial.println("Development MJPEG server started on port 81");
+  if (frame_id >= MAX_DATA_FRAME_ID) {
+    frame_id = 0;
   } else {
-    halt_with_error("could not start MJPEG server");
+    ++frame_id;
   }
+  return success;
 }
 
 static void connect_wifi() {
@@ -326,14 +313,18 @@ static void configure_camera() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
+  config.grab_mode = CAMERA_GRAB_LATEST;
+
   if (psramFound()) {
     config.frame_size = FRAMESIZE_VGA;
     config.jpeg_quality = 10;
     config.fb_count = 2;
+    config.fb_location = CAMERA_FB_IN_PSRAM;
   } else {
     config.frame_size = FRAMESIZE_QVGA;
     config.jpeg_quality = 12;
     config.fb_count = 1;
+    config.fb_location = CAMERA_FB_IN_DRAM;
   }
 
   const esp_err_t err = esp_camera_init(&config);
@@ -341,6 +332,7 @@ static void configure_camera() {
     Serial.printf("Camera init failed: 0x%x\n", err);
     halt_with_error("camera initialization failed");
   }
+
   sensor_t* sensor = esp_camera_sensor_get();
   if (sensor) {
     sensor->set_brightness(sensor, 0);
@@ -358,17 +350,14 @@ void setup() {
   Serial.begin(115200);
   pinMode(LED_GPIO_NUM, OUTPUT);
   digitalWrite(LED_GPIO_NUM, LOW);
+
   validate_secrets();
   configure_camera();
   connect_wifi();
 
-  if (USE_SECURE_UDP) {
-    if (!udp.begin(WVAB_UDP_PORT)) halt_with_error("could not initialize UDP socket");
-    if (!send_auth_packet()) halt_with_error("initial UDP authentication packet failed");
-    Serial.println("Authenticated AES-GCM UDP streaming enabled");
-  } else {
-    startCameraServer();
-  }
+  if (!udp.begin(WVAB_UDP_PORT)) halt_with_error("could not initialize UDP socket");
+  if (!send_auth_packet()) halt_with_error("initial UDP authentication packet failed");
+  Serial.println("WVAB authenticated AES-GCM UDP streaming enabled");
 
   for (int i = 0; i < 3; ++i) {
     digitalWrite(LED_GPIO_NUM, HIGH);
@@ -392,10 +381,7 @@ void loop() {
       return;
     }
   }
-  if (!USE_SECURE_UDP) {
-    delay(1000);
-    return;
-  }
+
   if (now - last_auth_ms >= AUTH_REFRESH_INTERVAL_MS) {
     if (send_auth_packet()) last_auth_ms = now;
   }
@@ -411,6 +397,7 @@ void loop() {
     delay(50);
     return;
   }
+
   if (!send_udp_frame(fb)) Serial.println("UDP frame send failed");
   esp_camera_fb_return(fb);
 }
