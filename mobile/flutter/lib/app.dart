@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'core/controllers/app_controller.dart';
 import 'core/theme/app_theme.dart';
 import 'features/home/home_screen.dart';
+import 'features/onboarding/onboarding_screen.dart';
 
 class WvabMobileApp extends StatelessWidget {
   const WvabMobileApp({super.key, required this.controller});
@@ -16,10 +17,12 @@ class WvabMobileApp extends StatelessWidget {
       builder: (context, _) {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
-          title: 'WVAB Mobile',
+          title: 'WVAB',
           theme: AppTheme.light(),
           themeMode: ThemeMode.light,
-          home: HomeScreen(controller: controller),
+          home: controller.settings.firstRunCompleted
+              ? HomeScreen(controller: controller)
+              : OnboardingScreen(controller: controller),
         );
       },
     );
