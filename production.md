@@ -46,11 +46,13 @@ python tools/generate_device_secrets.py \
 
 ## 3. Flash the ESP32-CAM
 
-Open `esp32_cam_stream.ino` in Arduino IDE with `esp32_secrets.h` beside it. Select the AI Thinker ESP32-CAM board and flash the firmware.
+Open `esp32_cam_stream.ino` in Arduino IDE with `esp32_secrets.h` beside it. Select the AI Thinker ESP32-CAM board and flash the firmware from the same compatible source revision as the Raspberry Pi server.
 
-The supported UDP path validates non-placeholder secrets, sends encrypted authentication packets, refreshes authentication periodically, and encrypts every video chunk with AES-GCM using fresh frame nonces. The firmware does not print Wi-Fi passwords, UDP tokens, or AES keys to serial output.
+The supported firmware is secure-UDP-only. It validates non-placeholder secrets, sends encrypted authentication packets, refreshes authentication while streaming, and encrypts every video chunk with AES-GCM. Every encrypted datagram carries a 96-bit frame nonce, and the full 10-byte UDP protocol header is authenticated as GCM Additional Authenticated Data (AAD), so changing frame/chunk metadata invalidates the packet.
 
-The unauthenticated MJPEG server remains a development-only fallback in source and is disabled by default.
+The server also rejects repeated authentication nonces during the authentication TTL, rejects completed-frame replay/out-of-order serials with wrap-aware comparison, and bounds chunk count, reconstructed frame size, and per-client in-flight frames. See `SECURE_UDP_PROTOCOL.md` for the packet contract.
+
+The release ESP32 firmware intentionally has no unauthenticated MJPEG fallback. For a trusted local/IP camera experiment, use `vision_server.py` instead of weakening the wearable transport.
 
 ## 4. Start the Raspberry Pi server
 
@@ -108,7 +110,9 @@ python udp_streaming.py server --config wvab_config.sample.json
 python udp_streaming.py client --config wvab_config.sample.json --server-ip 127.0.0.1 --camera 0
 ```
 
-For a smartphone/IP camera, pass the trusted local stream URL as `--camera`. Do not expose camera feeds or the UDP/control ports directly to the public Internet.
+Python sender/server use the same authenticated-header and replay-aware packet contract as the ESP32 path. Old packet formats are not compatibility targets after the security hardening.
+
+For a smartphone/IP camera, pass the trusted local stream URL to `vision_server.py` / `smartphone_camera.py`. Do not expose camera feeds or the UDP/control ports directly to the public Internet.
 
 ## 8. Depth and navigation research path
 
@@ -118,7 +122,9 @@ MiDaS is optional and scale-ambiguous. Provision it once while online:
 python tools/download_models.py midas
 ```
 
-Metric occupancy updates remain disabled unless external camera/depth calibration is explicitly configured. `navigation_pipeline.py` publishes `STOP`, `DEGRADED`, or `GUIDANCE_AVAILABLE` state instead of claiming a route is safe.
+Metric occupancy updates remain disabled unless external camera/depth calibration is explicitly configured. Metric guidance additionally requires coherent metric localization: calibrated depth is scaled before both VO and occupancy mapping, stale metric VO scale causes `DEGRADED`, and stale/malformed ORB-SLAM3 poses fail closed.
+
+`navigation_pipeline.py` publishes `STOP`, `DEGRADED`, or `GUIDANCE_AVAILABLE` state instead of claiming a route is safe.
 
 ## 9. Validation before any supervised trial
 
@@ -126,11 +132,12 @@ At minimum capture evidence for:
 
 - 8+ hour soak behavior and memory/thermal trends,
 - camera/network/TTS dropout and recovery,
-- malformed/incomplete UDP handling,
+- malformed/incomplete/replayed UDP handling,
+- AES-GCM header-tamper rejection and authentication replay rejection,
 - authenticated/encrypted transport verification,
 - model accuracy on representative mobility hazards,
 - end-to-end latency p50/p95/p99,
-- calibration error for any metric-distance claim,
+- calibration/localization error for any metric-distance or metric-navigation claim,
 - supervised evaluation with blind/low-vision users under an appropriate ethics/consent process.
 
 See `PRODUCTION_READINESS.md` for the full release gate. The absence of a failed automated test is not evidence of field safety.

@@ -12,6 +12,12 @@ from mapping.occupancy_grid import OccupancyGrid
 from navigation.a_star import a_star
 from perception.perception_mapping import detections_to_points
 from tools.download_models import sha256_file
+from training.runtime_validation import (
+    require_non_negative,
+    require_positive,
+    validate_dataset_yaml,
+    validate_export_format,
+)
 
 
 def _valid_config():
@@ -122,3 +128,51 @@ def test_a_star_returns_empty_when_goal_is_blocked():
     grid = OccupancyGrid(width_m=3, height_m=3, resolution=1.0, origin=(0, 0))
     grid.log_odds[2, 2] = 5.0
     assert a_star(grid, (0, 0), (2, 2), allow_diagonal=True) == []
+
+
+def test_training_numeric_validation_rejects_invalid_values():
+    with pytest.raises(ValueError, match="epochs"):
+        require_positive("epochs", 0)
+    with pytest.raises(ValueError, match="workers"):
+        require_non_negative("workers", -1)
+
+
+def test_export_format_validation_is_allowlisted():
+    assert validate_export_format("OpenVINO") == "openvino"
+    assert validate_export_format("engine") == "engine"
+    with pytest.raises(ValueError, match="unsupported export format"):
+        validate_export_format("saved_model")
+
+
+def test_dataset_yaml_requires_real_local_splits(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    dataset_root = tmp_path / "data" / "custom_wvab"
+    (dataset_root / "images" / "train").mkdir(parents=True)
+    (dataset_root / "images" / "val").mkdir(parents=True)
+    yaml_path = tmp_path / "dataset.yaml"
+    yaml_path.write_text(
+        "path: data/custom_wvab\n"
+        "train: images/train\n"
+        "val: images/val\n"
+        "names:\n"
+        "  0: person\n",
+        encoding="utf-8",
+    )
+    data = validate_dataset_yaml(str(yaml_path), require_train=True)
+    assert data["names"][0] == "person"
+
+
+def test_dataset_yaml_fails_closed_when_split_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data" / "custom_wvab" / "images" / "train").mkdir(parents=True)
+    yaml_path = tmp_path / "dataset.yaml"
+    yaml_path.write_text(
+        "path: data/custom_wvab\n"
+        "train: images/train\n"
+        "val: images/val\n"
+        "names:\n"
+        "  0: person\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(FileNotFoundError, match="val split"):
+        validate_dataset_yaml(str(yaml_path), require_train=True)

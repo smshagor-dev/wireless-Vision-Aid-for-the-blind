@@ -89,9 +89,9 @@ class Doctor:
             cfg = validate_navigation_config(load_config(str(ROOT / "config" / "config.yaml")))
         except Exception as exc:
             return self.fail("Navigation config", exc)
-        intr = cfg["camera"]["intrinsics"]
+        intrinsics = cfg["camera"]["intrinsics"]
         depth = cfg["perception"]["depth"]
-        if intr.get("calibrated") or depth.get("metric_calibrated"):
+        if intrinsics.get("calibrated") or depth.get("metric_calibrated"):
             return self.warn("Navigation config", "metric calibration flags are enabled; verify deployment calibration evidence")
         return self.passed("Navigation config", "valid; metric geometry remains disabled by default")
 
@@ -136,6 +136,30 @@ class Doctor:
     def _valid_key_hex(value):
         return bool(re.fullmatch(r"(?:[0-9A-Fa-f]{32}|[0-9A-Fa-f]{48}|[0-9A-Fa-f]{64})", value or ""))
 
+    @staticmethod
+    def _header_string(header_text, name):
+        match = re.search(rf'^#define\s+{re.escape(name)}\s+"([^"]*)"\s*$', header_text, re.MULTILINE)
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _header_int(header_text, name):
+        match = re.search(rf"^#define\s+{re.escape(name)}\s+(\d+)\s*$", header_text, re.MULTILINE)
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _header_key_hex(header_text):
+        match = re.search(
+            r"static\s+const\s+uint8_t\s+WVAB_AES_KEY\s*\[\s*\d+\s*\]\s*=\s*\{([^}]*)\}",
+            header_text,
+            re.DOTALL,
+        )
+        if not match:
+            return None
+        byte_values = re.findall(r"0x([0-9A-Fa-f]{2})", match.group(1))
+        if len(byte_values) not in (16, 24, 32):
+            return None
+        return "".join(byte_values).lower()
+
     def check_device_pair(self, required=False):
         header = ROOT / "esp32_secrets.h"
         env_file = ROOT / "deployment" / "rpi" / "wvab_edge.env"
@@ -144,26 +168,63 @@ class Doctor:
             return self.fail("Device credential pair", message) if required else self.warn("Device credential pair", message)
         if header.exists() != env_file.exists():
             return self.fail("Device credential pair", "only one side of the ESP32/Pi credential pair exists")
+
         try:
             header_text = header.read_text(encoding="utf-8")
             env = self._parse_env(env_file)
         except Exception as exc:
             return self.fail("Device credential pair", exc)
+
         if not re.search(r"#define\s+WVAB_SECRETS_CONFIGURED\s+1\b", header_text):
             return self.fail("Device credential pair", "ESP32 header is not marked configured")
+        if env.get("WVAB_OFFLINE") != "1":
+            return self.fail("Device credential pair", "Raspberry Pi edge runtime must be offline-first")
         if env.get("WVAB_UDP_AUTH") != "1" or env.get("WVAB_UDP_ENCRYPT") != "1":
             return self.fail("Device credential pair", "UDP authentication/encryption must both be enabled")
-        if not self._valid_key_hex(env.get("WVAB_UDP_KEY_HEX")):
+        if env.get("WVAB_ALLOW_INSECURE_UDP", "0") != "0":
+            return self.fail("Device credential pair", "insecure UDP override must be disabled for edge deployment")
+
+        env_key = env.get("WVAB_UDP_KEY_HEX", "")
+        if not self._valid_key_hex(env_key):
             return self.fail("Device credential pair", "Raspberry Pi AES key is missing or malformed")
-        if len(env.get("WVAB_UDP_TOKEN", "")) < 16:
+        header_key = self._header_key_hex(header_text)
+        if header_key is None:
+            return self.fail("Device credential pair", "ESP32 AES key declaration is missing or malformed")
+        if header_key != env_key.lower():
+            return self.fail("Device credential pair", "ESP32 and Raspberry Pi AES keys do not match")
+
+        env_token = env.get("WVAB_UDP_TOKEN", "")
+        if len(env_token) < 16:
             return self.fail("Device credential pair", "Raspberry Pi UDP token is too short")
+        header_token = self._header_string(header_text, "WVAB_UDP_TOKEN")
+        if header_token != env_token:
+            return self.fail("Device credential pair", "ESP32 and Raspberry Pi UDP tokens do not match")
+
+        try:
+            env_port = int(env.get("WVAB_UDP_PORT", ""))
+        except ValueError:
+            env_port = -1
+        header_port = self._header_int(header_text, "WVAB_UDP_PORT")
+        if not 1 <= env_port <= 65535 or header_port != env_port:
+            return self.fail("Device credential pair", "ESP32 and Raspberry Pi UDP ports are missing or do not match")
+
         if len(env.get("WVAB_WS_TOKEN", "")) < 16:
             return self.fail("Device credential pair", "WebSocket token is too short")
-        return self.passed("Device credential pair", "local ESP32/Pi credential files pass structural checks", required=required)
+        return self.passed(
+            "Device credential pair",
+            f"ESP32/Pi key, token, port {env_port}, and secure edge policy match",
+            required=required,
+        )
 
     def check_environment_udp_credentials(self):
         key = os.environ.get("WVAB_UDP_KEY_HEX", "")
         token = os.environ.get("WVAB_UDP_TOKEN", "")
+        if os.environ.get("WVAB_UDP_AUTH", "1") != "1":
+            return self.fail("UDP environment", "WVAB_UDP_AUTH must not be disabled")
+        if os.environ.get("WVAB_UDP_ENCRYPT", "1") != "1":
+            return self.fail("UDP environment", "WVAB_UDP_ENCRYPT must not be disabled")
+        if os.environ.get("WVAB_ALLOW_INSECURE_UDP", "0") != "0":
+            return self.fail("UDP environment", "WVAB_ALLOW_INSECURE_UDP is enabled")
         if not key and not token:
             return self.warn("UDP environment", "no process-level UDP credentials exported")
         if not self._valid_key_hex(key):
@@ -218,9 +279,9 @@ class Doctor:
             return self.warn("TTS engine", f"engine unavailable on this host: {exc}")
 
     def summary(self):
-        required_failures = [r for r in self.results if r["required"] and r["status"] == "FAIL"]
-        warnings = [r for r in self.results if r["status"] == "WARN"]
-        passes = [r for r in self.results if r["status"] == "PASS"]
+        required_failures = [result for result in self.results if result["required"] and result["status"] == "FAIL"]
+        warnings = [result for result in self.results if result["status"] == "WARN"]
+        passes = [result for result in self.results if result["status"] == "PASS"]
         print("\n" + "=" * 72)
         print(f"WVAB doctor: {len(passes)} passed, {len(warnings)} warnings, {len(required_failures)} required failures")
         if required_failures:

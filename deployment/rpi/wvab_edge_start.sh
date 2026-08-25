@@ -16,6 +16,9 @@ set -a
 source "$ENV_FILE"
 set +a
 
+export WVAB_OFFLINE="${WVAB_OFFLINE:-1}"
+export WVAB_ALLOW_INSECURE_UDP=0
+
 UDP_TOKEN="${WVAB_UDP_TOKEN:-}"
 WS_TOKEN="${WVAB_WS_TOKEN:-}"
 if [[ "${WVAB_UDP_AUTH:-}" != "1" || "${WVAB_UDP_ENCRYPT:-}" != "1" ]]; then
@@ -40,6 +43,15 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   echo "ERROR: $PYTHON_BIN not found" >&2
   exit 2
 fi
+if ! "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+then
+  echo "ERROR: WVAB requires Python 3.10 or newer." >&2
+  exit 2
+fi
+
 MODEL_PATH="${WVAB_MODEL_PATH:-yolov8n.pt}"
 if [[ ! -f "$MODEL_PATH" ]]; then
   echo "ERROR: model not found: $MODEL_PATH" >&2
