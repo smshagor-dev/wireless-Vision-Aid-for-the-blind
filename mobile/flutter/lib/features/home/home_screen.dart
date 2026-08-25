@@ -34,9 +34,9 @@ class HomeScreen extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            const Semantics(
+            Semantics(
               headingLevel: 1,
-              child: Text(
+              child: const Text(
                 'Vision assistance',
                 style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
               ),
@@ -70,12 +70,12 @@ class HomeScreen extends StatelessWidget {
               label: const Text('Test voice and vibration'),
             ),
             const SizedBox(height: 28),
-            const Semantics(
+            Semantics(
               headingLevel: 2,
-              child: Text('System status', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+              child: const Text('System status', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
             ),
             const SizedBox(height: 12),
-            _StatusCard(
+            const _StatusCard(
               icon: Icons.camera_alt,
               title: 'Camera',
               value: 'Ready to initialize',
@@ -87,7 +87,7 @@ class HomeScreen extends StatelessWidget {
                   ? 'Configured: $endpoint — transport not connected yet'
                   : 'Not configured',
             ),
-            _StatusCard(
+            const _StatusCard(
               icon: Icons.security,
               title: 'Secure transport',
               value: 'Protocol v2 integration pending',
