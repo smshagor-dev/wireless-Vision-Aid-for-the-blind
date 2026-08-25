@@ -49,10 +49,10 @@ jobs:
       - name: Run Flutter tests
         run: flutter test
 
-      - name: Generate Android host project
+      - name: Generate Android host project and launcher branding
         run: bash tool/bootstrap_android.sh
 
-      - name: Verify Android security and SDK contract
+      - name: Verify Android security, SDK, and branding contract
         shell: bash
         run: |
           set -euo pipefail
@@ -61,6 +61,24 @@ jobs:
           grep -F 'android.permission.INTERNET' android/app/src/main/AndroidManifest.xml >/dev/null
           grep -F 'android.permission.VIBRATE' android/app/src/main/AndroidManifest.xml >/dev/null
           grep -F 'android.intent.action.TTS_SERVICE' android/app/src/main/AndroidManifest.xml >/dev/null
+          grep -F 'android:label="WVAB"' android/app/src/main/AndroidManifest.xml >/dev/null
+          test -s .generated/wvab_launcher.png
+          test -s .generated/wvab_launcher_foreground.png
+          test -s android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          test -s android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+
+          expected = {
+              Path('.generated/wvab_launcher.png'): '3dd7859dabcc70ea7b5b8069b46b532a85924239b29d27e7aa7344ebe6467c43',
+              Path('.generated/wvab_launcher_foreground.png'): '97aea4f3229f4fef747ab1d531dfec8e2bd3df5ea12157d5f3865190f10ea574',
+          }
+          for path, digest in expected.items():
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != digest:
+                  raise SystemExit(f'{path} checksum mismatch: {actual}')
+          PY
 
       - name: Build split debug APKs
         run: flutter build apk --debug --split-per-abi
