@@ -17,6 +17,7 @@ dependencies:
   flutter_secure_storage: ^11.0.0
   cryptography: ^2.9.0
   cryptography_flutter: ^2.3.4
+  image: ^4.9.2
 
 dev_dependencies:
   flutter_test:
