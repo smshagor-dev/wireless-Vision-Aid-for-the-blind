@@ -1,55 +1,68 @@
-<!--
-Name: Md. Shahanur Islam Shagor
-Autonomous Systems & UAV Researcher | Cybersecurity Specialist | Software Engineer
-Voronezh State University of Forestry and Technologies
-Build for Blind people within 15$
--->
+# WVAB Quick Start
 
-# QUICK START
+## 1. Setup and diagnostics
 
-## 1) Setup & Run
+WVAB requires Python 3.10+.
 
 ```bash
 ./quick_start.sh setup
 ./quick_start.sh doctor
-./quick_start.sh run esp32
 ```
 
-Other run modes:
+Normal camera helpers:
 
 ```bash
+./quick_start.sh run esp32
 ./quick_start.sh run phone
+```
+
+## 2. Secure UDP server/client
+
+Generate deployment-specific credentials and export them before using UDP mode:
+
+```bash
+export WVAB_UDP_KEY_HEX="$(python - <<'PY'
+import os
+print(os.urandom(32).hex())
+PY
+)"
+export WVAB_UDP_TOKEN="$(python - <<'PY'
+import secrets
+print(secrets.token_urlsafe(24))
+PY
+)"
+```
+
+Then start the server and sender:
+
+```bash
 ./quick_start.sh run udp-server
 ./quick_start.sh run udp-client 192.168.1.10
 ```
 
-## 2) Cheap real-life C++ planner module
+The quick-start script refuses UDP mode when the token is blank or the AES key length is invalid. WebSocket control is loopback-only by default and uses `WVAB_WS_TOKEN` when set, otherwise it reuses `WVAB_UDP_TOKEN`.
+
+## 3. C++ planner experiment
 
 Files:
+
 - `cpp/navigation_planner.h`
 - `cpp/navigation_planner.cpp`
 
-This module takes detections (`class_name`, `confidence`, bbox center/area) and returns:
-- `GO LEFT`
-- `GO RIGHT`
-- `GO STRAIGHT`
-- `SLOW - path blocked ahead`
-- `STOP - obstacle very close`
+The C++ demo produces directional/stop-style planner outputs from detection heuristics. These outputs are experimental and are not a certified mobility-safety controller.
 
-## 3) Build C++ demo
-
-Using CMake:
+Build with CMake:
 
 ```bash
-cd cpp
-cmake -S . -B build
-cmake --build build --config Release
-./build/navigation_demo
+cmake -S cpp -B cpp/build
+cmake --build cpp/build --config Release
 ```
 
-Or with g++ directly:
+Or build the demo directly with g++:
 
 ```bash
 g++ -std=c++17 -O2 -Icpp cpp/navigation_planner.cpp cpp/main_demo.cpp -o navigation_demo
 ./navigation_demo
 ```
+
+`cpp/build/` is intentionally ignored and must not be committed.

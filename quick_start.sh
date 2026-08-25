@@ -1,10 +1,3 @@
-# --------------------------------------------------------------------------------------------- # 
-# | Name: Md. Shahanur Islam Shagor                                                           | # 
-# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
-# | Voronezh State University of Forestry and Technologies                                    | # 
-# | Build for Blind people within 15$                                                         | # 
-# --------------------------------------------------------------------------------------------- # 
-
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -13,7 +6,16 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${VENV_DIR:-${ROOT_DIR}/.venv}"
 
 if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
-  echo "Python not found. Install Python 3.8+ first."
+  echo "Python not found. Install Python 3.10+ first." >&2
+  exit 1
+fi
+
+if ! "${PYTHON_BIN}" - <<'PY' >/dev/null 2>&1
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+then
+  echo "WVAB requires Python 3.10 or newer." >&2
   exit 1
 fi
 
@@ -36,6 +38,17 @@ activate_env() {
   source "${VENV_DIR}/bin/activate"
 }
 
+require_udp_credentials() {
+  if [[ -z "${WVAB_UDP_TOKEN:-}" ]]; then
+    echo "ERROR: export a unique WVAB_UDP_TOKEN before using UDP mode." >&2
+    exit 2
+  fi
+  if [[ ! "${WVAB_UDP_KEY_HEX:-}" =~ ^([0-9A-Fa-f]{32}|[0-9A-Fa-f]{48}|[0-9A-Fa-f]{64})$ ]]; then
+    echo "ERROR: WVAB_UDP_KEY_HEX must be a 16, 24, or 32-byte hexadecimal key." >&2
+    exit 2
+  fi
+}
+
 run_doctor() {
   activate_env
   python "${ROOT_DIR}/test_system.py"
@@ -53,21 +66,22 @@ run_phone() {
 
 run_udp_server() {
   activate_env
-  printf "1\n" | python "${ROOT_DIR}/udp_streaming.py"
+  require_udp_credentials
+  python "${ROOT_DIR}/udp_streaming.py" server --config "${ROOT_DIR}/wvab_config.sample.json"
 }
 
 run_udp_client() {
   local server_ip="${1:-192.168.4.1}"
   activate_env
-  {
-    printf "2\n"
-    printf "%s\n" "${server_ip}"
-    printf "0\n"
-  } | python "${ROOT_DIR}/udp_streaming.py"
+  require_udp_credentials
+  python "${ROOT_DIR}/udp_streaming.py" client \
+    --config "${ROOT_DIR}/wvab_config.sample.json" \
+    --server-ip "${server_ip}" \
+    --camera 0
 }
 
 show_help() {
-  cat <<EOF
+  cat <<'EOF'
 WVAB quick start
 
 Usage:
@@ -78,11 +92,16 @@ Usage:
   ./quick_start.sh run udp-server
   ./quick_start.sh run udp-client [server_ip]
 
+Secure UDP modes require these environment variables first:
+  WVAB_UDP_KEY_HEX=<16/24/32-byte hex key>
+  WVAB_UDP_TOKEN=<unique token>
+
 Examples:
   ./quick_start.sh setup
   ./quick_start.sh doctor
   ./quick_start.sh run esp32
   ./quick_start.sh run phone
+  ./quick_start.sh run udp-server
   ./quick_start.sh run udp-client 192.168.1.10
 EOF
 }
@@ -90,12 +109,8 @@ EOF
 main() {
   local cmd="${1:-help}"
   case "${cmd}" in
-    setup)
-      setup_env
-      ;;
-    doctor)
-      run_doctor
-      ;;
+    setup) setup_env ;;
+    doctor) run_doctor ;;
     run)
       local mode="${2:-}"
       case "${mode}" in
@@ -106,13 +121,8 @@ main() {
         *) show_help; exit 1 ;;
       esac
       ;;
-    help|-h|--help)
-      show_help
-      ;;
-    *)
-      show_help
-      exit 1
-      ;;
+    help|-h|--help) show_help ;;
+    *) show_help; exit 1 ;;
   esac
 }
 
