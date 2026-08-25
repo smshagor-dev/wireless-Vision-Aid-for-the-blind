@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../core/controllers/app_controller.dart';
-import '../../core/services/edge_connection_service.dart';
+import '../../core/theme/app_theme.dart';
 import '../camera/camera_screen.dart';
+import '../connection/connection_screen.dart';
+import '../history/history_screen.dart';
+import '../language/language_screen.dart';
 import '../settings/settings_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -12,129 +15,191 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final endpoint = controller.edgeEndpoint;
-    final configured = controller.edgeState == EdgeConfigurationState.configured;
-
+    final strings = controller.strings;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('WVAB Mobile'),
-        actions: [
-          IconButton(
-            tooltip: 'Settings',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => SettingsScreen(controller: controller),
-              ),
-            ),
-            icon: const Icon(Icons.settings_accessibility),
-          ),
-        ],
-      ),
+      backgroundColor: AppTheme.navy,
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            Semantics(
-              headingLevel: 1,
-              child: const Text(
-                'Vision assistance',
-                style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
-              ),
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF081438), Color(0xFF050D27)],
             ),
-            const SizedBox(height: 8),
-            const Text(
-              'Use the phone camera for accessible visual feedback. Edge streaming will only be enabled after Secure UDP Protocol v2 integration is complete.',
-              style: TextStyle(fontSize: 18, height: 1.4),
-            ),
-            const SizedBox(height: 24),
-            Semantics(
-              button: true,
-              label: 'Start camera assistance',
-              hint: 'Opens the camera preview and enables local voice and vibration feedback.',
-              child: FilledButton.icon(
-                key: const Key('start-assistance-button'),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => CameraScreen(controller: controller),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(22, 12, 22, 20),
+            child: Column(
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: IconButton(
+                    key: const Key('language-button'),
+                    style: IconButton.styleFrom(foregroundColor: Colors.white),
+                    tooltip: strings.get('languageTitle'),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => LanguageScreen(controller: controller)),
+                    ),
+                    icon: const Icon(Icons.language_rounded, size: 28),
                   ),
                 ),
-                icon: const Icon(Icons.visibility, size: 30),
-                label: const Text('Start Assistance'),
-              ),
+                const SizedBox(height: 16),
+                Text(
+                  strings.get('appName'),
+                  style: const TextStyle(color: Colors.white, fontSize: 42, fontWeight: FontWeight.w900, letterSpacing: 1.5),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  strings.get('appSubtitle'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 20, height: 1.35, fontWeight: FontWeight.w500),
+                ),
+                const Spacer(),
+                Semantics(
+                  button: true,
+                  label: strings.get('startAssistance').replaceAll('\n', ' '),
+                  child: InkWell(
+                    key: const Key('start-assistance-button'),
+                    customBorder: const CircleBorder(),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => CameraScreen(controller: controller)),
+                    ),
+                    child: Container(
+                      width: 184,
+                      height: 184,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Color(0xFF147A50), Color(0xFF0E5B3D)],
+                        ),
+                        border: Border.all(color: const Color(0xFF34C77C), width: 4),
+                        boxShadow: const [
+                          BoxShadow(color: Color(0x5534C77C), blurRadius: 28, spreadRadius: 2),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.graphic_eq_rounded, color: Colors.white, size: 48),
+                          const SizedBox(height: 10),
+                          Text(
+                            strings.get('startAssistance'),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.white, fontSize: 17, height: 1.15, fontWeight: FontWeight.w800),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _HomeTile(
+                        icon: Icons.settings_outlined,
+                        label: strings.get('settings'),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(builder: (_) => SettingsScreen(controller: controller)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: _HomeTile(
+                        icon: Icons.history_rounded,
+                        label: strings.get('history'),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(builder: (_) => HistoryScreen(controller: controller)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF091634),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: const Color(0xFF142755)),
+                  ),
+                  child: Row(
+                    children: [
+                      const ContainerDot(),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          strings.get('notConnected'),
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(builder: (_) => ConnectionScreen(controller: controller)),
+                        ),
+                        icon: const Icon(Icons.cell_tower_rounded, color: Colors.white),
+                      ),
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(builder: (_) => LanguageScreen(controller: controller)),
+                        ),
+                        icon: const Icon(Icons.translate_rounded, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-              onPressed: () => controller.announce('WVAB Mobile feedback test'),
-              icon: const Icon(Icons.record_voice_over),
-              label: const Text('Test voice and vibration'),
-            ),
-            const SizedBox(height: 28),
-            Semantics(
-              headingLevel: 2,
-              child: const Text('System status', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-            ),
-            const SizedBox(height: 12),
-            const _StatusCard(
-              icon: Icons.camera_alt,
-              title: 'Camera',
-              value: 'Ready to initialize',
-            ),
-            _StatusCard(
-              icon: Icons.router,
-              title: 'Edge server',
-              value: configured && endpoint != null
-                  ? 'Configured: $endpoint — transport not connected yet'
-                  : 'Not configured',
-            ),
-            const _StatusCard(
-              icon: Icons.security,
-              title: 'Secure transport',
-              value: 'Protocol v2 integration pending',
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Safety: WVAB Mobile is an assistive research prototype and must not be treated as proof that a route is safe.',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.error,
-                fontWeight: FontWeight.w700,
-                fontSize: 16,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.icon, required this.title, required this.value});
-
-  final IconData icon;
-  final String title;
-  final String value;
+class ContainerDot extends StatelessWidget {
+  const ContainerDot({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      width: 9,
+      height: 9,
+      decoration: const BoxDecoration(color: AppTheme.red, shape: BoxShape.circle),
+    );
+  }
+}
+
+class _HomeTile extends StatelessWidget {
+  const _HomeTile({required this.icon, required this.label, required this.onTap});
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Container(
+        height: 116,
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [Color(0xFF0D3B67), Color(0xFF0A2854)]),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFF16497B)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 30),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 4),
-                  Text(value, style: Theme.of(context).textTheme.bodyLarge),
-                ],
-              ),
-            ),
+            Icon(icon, color: Colors.white, size: 38),
+            const SizedBox(height: 10),
+            Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
           ],
         ),
       ),
