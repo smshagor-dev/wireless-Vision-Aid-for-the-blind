@@ -6,20 +6,35 @@ import struct
 
 
 MAX_UDP_PAYLOAD = 1450
-HEADER_FORMAT = "!IHHH"
+# session_id, frame_id, total_chunks, chunk_index, payload_size
+HEADER_FORMAT = "!IIHHH"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 NONCE_SIZE = 12
 TAG_SIZE = 16
 AUTH_FRAME_ID = 0xFFFFFFFF
 MAX_DATA_FRAME_ID = AUTH_FRAME_ID - 1
+MAX_SESSION_ID = 0xFFFFFFFF
 MAX_FRAME_CHUNKS = 1024
 MAX_FRAME_BYTES = 2 * 1024 * 1024
 MAX_INFLIGHT_FRAMES_PER_CLIENT = 8
 
 
-def pack_header(frame_id: int, total_chunks: int, chunk_index: int, payload_size: int) -> bytes:
+def valid_session_id(session_id: int) -> bool:
+    return 1 <= int(session_id) <= MAX_SESSION_ID
+
+
+def pack_header(
+    session_id: int,
+    frame_id: int,
+    total_chunks: int,
+    chunk_index: int,
+    payload_size: int,
+) -> bytes:
+    if not valid_session_id(session_id):
+        raise ValueError("session_id must be a non-zero uint32")
     return struct.pack(
         HEADER_FORMAT,
+        int(session_id) & 0xFFFFFFFF,
         int(frame_id) & 0xFFFFFFFF,
         int(total_chunks) & 0xFFFF,
         int(chunk_index) & 0xFFFF,
@@ -30,7 +45,10 @@ def pack_header(frame_id: int, total_chunks: int, chunk_index: int, payload_size
 def unpack_header(header: bytes):
     if len(header) != HEADER_SIZE:
         raise ValueError("invalid UDP header length")
-    return struct.unpack(HEADER_FORMAT, header)
+    values = struct.unpack(HEADER_FORMAT, header)
+    if not valid_session_id(values[0]):
+        raise ValueError("invalid UDP session id")
+    return values
 
 
 def frame_id_is_newer(candidate: int, previous: int | None) -> bool:
