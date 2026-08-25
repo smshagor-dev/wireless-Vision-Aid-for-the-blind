@@ -47,6 +47,8 @@ Minimum release evidence:
 - client/server watchdog and bounded auto-restart test
 - malformed/incomplete UDP frame test
 - packet reordering/loss test
+- sender/ESP32 reboot with frame counter restarting at zero under a fresh authenticated session
+- stale/retired-session replay test
 - stale ORB-SLAM3 output test
 - calibrated-depth dropout test
 
@@ -60,18 +62,21 @@ Required defaults:
 - UDP token length at least 16 characters
 - unique token and key per deployment
 - example credentials must never be reused in a real deployment
-- unencrypted UDP requires the explicit development override `WVAB_ALLOW_INSECURE_UDP=1`
+- authentication/encryption exceptions require the explicit development override `WVAB_ALLOW_INSECURE_UDP=1`
 - WebSocket control binds to `127.0.0.1` by default
 - every WebSocket control command is authenticated
 - use a dedicated `WVAB_WS_TOKEN` when control is exposed beyond loopback
 
 For the supported UDP wire protocol:
 
-- the complete 10-byte packet header is authenticated as AES-GCM AAD
-- every encrypted datagram carries the frame base nonce
-- authentication nonce replay is rejected during the authentication TTL
-- completed frame IDs are replay/order checked per authenticated UDP sender with wrap-aware serial comparison
-- packet/chunk/frame size and per-client in-flight buffering are bounded
+- the complete 14-byte header, including the non-zero 32-bit session ID, is authenticated as AES-GCM AAD
+- every encrypted datagram carries its frame base nonce
+- authentication nonce replay is rejected from a bounded process-lifetime replay cache
+- a valid new sender session retires the old session for that UDP source
+- authentication refresh in the same session does not reset frame replay state
+- completed frame IDs are replay/order checked per authenticated source + session with wrap-aware serial comparison
+- packet/chunk/frame size, authenticated-client state, replay caches, and in-flight buffering are bounded
+- the server watchdog depends on completed/decodeable frames rather than authentication/chunk traffic
 - old incompatible packet formats are not silently accepted
 
 See `SECURE_UDP_PROTOCOL.md` for the exact packet contract.
@@ -87,7 +92,7 @@ Record distributions rather than one-off values:
 - end-to-end camera-to-audio latency p50/p95/p99
 - UDP packet loss and incomplete-frame rate
 - replay/header-integrity rejection counts during fault injection
-- reconnect time
+- reconnect/re-authentication time after sender reboot
 
 A historical target such as `latency < 200 ms` is not considered validated until measured on the actual deployment hardware and network.
 

@@ -14,9 +14,10 @@
 
 // WVAB ESP32-CAM secure transport.
 // Packet header (network byte order):
-//   frame_id:uint32 | total_chunks:uint16 | chunk_index:uint16 | payload_size:uint16
+//   session_id:uint32 | frame_id:uint32 | total_chunks:uint16 |
+//   chunk_index:uint16 | payload_size:uint16
 // Every encrypted packet carries: base_nonce[12] | GCM tag[16] | ciphertext.
-// The complete 10-byte header is authenticated as AES-GCM AAD.
+// The complete 14-byte header is authenticated as AES-GCM AAD.
 
 #define TARGET_FPS 12
 #define MIN_FRAME_INTERVAL_MS (1000 / TARGET_FPS)
@@ -25,7 +26,7 @@
 #define AUTH_REFRESH_INTERVAL_MS 10000
 
 const uint16_t MAX_UDP_PAYLOAD = 1450;
-const uint16_t HEADER_SIZE = 10;
+const uint16_t HEADER_SIZE = 14;
 const uint16_t NONCE_SIZE = 12;
 const uint16_t TAG_SIZE = 16;
 const uint16_t MAX_FRAME_CHUNKS = 1024;
@@ -33,6 +34,7 @@ const uint32_t AUTH_FRAME_ID = 0xFFFFFFFFu;
 const uint32_t MAX_DATA_FRAME_ID = 0xFFFFFFFEu;
 
 WiFiUDP udp;
+uint32_t session_id = 0;
 uint32_t frame_id = 0;
 
 #define PWDN_GPIO_NUM     32
@@ -105,14 +107,16 @@ static void write_u16(uint8_t* buf, uint16_t value) {
 
 static void build_header(
     uint8_t header[HEADER_SIZE],
+    uint32_t current_session_id,
     uint32_t current_frame_id,
     uint16_t total_chunks,
     uint16_t chunk_index,
     uint16_t payload_size) {
-  write_u32(header, current_frame_id);
-  write_u16(header + 4, total_chunks);
-  write_u16(header + 6, chunk_index);
-  write_u16(header + 8, payload_size);
+  write_u32(header, current_session_id);
+  write_u32(header + 4, current_frame_id);
+  write_u16(header + 8, total_chunks);
+  write_u16(header + 10, chunk_index);
+  write_u16(header + 12, payload_size);
 }
 
 static void derive_nonce(
@@ -162,11 +166,11 @@ static bool send_packet(
 
 static bool send_auth_packet() {
   const size_t token_len = strlen(WVAB_UDP_TOKEN);
-  if (token_len < 16 || token_len > 256) return false;
+  if (token_len < 16 || token_len > 256 || session_id == 0) return false;
 
   const uint16_t payload_len = static_cast<uint16_t>(NONCE_SIZE + TAG_SIZE + token_len);
   uint8_t header[HEADER_SIZE];
-  build_header(header, AUTH_FRAME_ID, 0, 0, payload_len);
+  build_header(header, session_id, AUTH_FRAME_ID, 0, 0, payload_len);
 
   uint8_t base_nonce[NONCE_SIZE];
   esp_fill_random(base_nonce, sizeof(base_nonce));
@@ -198,7 +202,7 @@ static bool send_auth_packet() {
 }
 
 static bool send_udp_frame(camera_fb_t* fb) {
-  if (!fb || !fb->buf || fb->len == 0) return false;
+  if (!fb || !fb->buf || fb->len == 0 || session_id == 0) return false;
 
   const uint16_t max_plain = MAX_UDP_PAYLOAD - HEADER_SIZE - NONCE_SIZE - TAG_SIZE;
   const size_t chunk_count = (fb->len + max_plain - 1) / max_plain;
@@ -226,7 +230,7 @@ static bool send_udp_frame(camera_fb_t* fb) {
     const uint16_t payload_len = static_cast<uint16_t>(NONCE_SIZE + TAG_SIZE + plain_len);
 
     uint8_t header[HEADER_SIZE];
-    build_header(header, frame_id, total_chunks, chunk_index, payload_len);
+    build_header(header, session_id, frame_id, total_chunks, chunk_index, payload_len);
 
     uint8_t nonce[NONCE_SIZE];
     derive_nonce(base_nonce, chunk_index, nonce);
@@ -352,6 +356,11 @@ void setup() {
   digitalWrite(LED_GPIO_NUM, LOW);
 
   validate_secrets();
+  do {
+    session_id = esp_random();
+  } while (session_id == 0);
+  frame_id = 0;
+
   configure_camera();
   connect_wifi();
 

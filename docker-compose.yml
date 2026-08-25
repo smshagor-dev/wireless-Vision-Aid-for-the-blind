@@ -3,19 +3,20 @@ services:
     build:
       context: .
     init: true
-    command: ["python", "udp_streaming.py", "server", "--config", "wvab_config.sample.json"]
+    command: ["bash", "deployment/rpi/wvab_edge_start.sh"]
     env_file:
       - ./deployment/rpi/wvab_edge.env
     environment:
+      WVAB_PYTHON_BIN: python
       WVAB_UDP_TTS: "0"
       WVAB_UDP_HEADLESS: "1"
-      WVAB_UDP_WATCHDOG_SERVER_IDLE_S: "0"
+      WVAB_UDP_WATCHDOG_SERVER_FRAME_IDLE_S: "30"
       WVAB_UDP_LOG_PATH: /tmp/wvab_udp_server.log
       WVAB_UDP_HEALTH_PATH: /tmp/wvab_udp_server_health.json
       WVAB_WS_CONTROL: "0"
       YOLO_CONFIG_DIR: /tmp/Ultralytics
     ports:
-      - "9999:9999/udp"
+      - "${WVAB_UDP_PORT:-9999}:${WVAB_UDP_PORT:-9999}/udp"
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -26,7 +27,7 @@ services:
         - CMD
         - python
         - -c
-        - "import json,time; p=json.load(open('/tmp/wvab_udp_server_health.json')); assert time.time()-float(p['ts']) < 20"
+        - "import json,time; p=json.load(open('/tmp/wvab_udp_server_health.json')); assert time.time()-float(p['ts']) < 20; assert float(p['last_completed_frame_s']) < 25"
       interval: 10s
       timeout: 3s
       retries: 3

@@ -1,3 +1,5 @@
+import pytest
+
 from core.udp_protocol import (
     AUTH_FRAME_ID,
     HEADER_SIZE,
@@ -8,13 +10,29 @@ from core.udp_protocol import (
     pack_header,
     unpack_header,
     valid_frame_shape,
+    valid_session_id,
 )
+from core.udp_runtime import _new_session_id
 
 
-def test_header_round_trip():
-    header = pack_header(42, 3, 1, 100)
-    assert len(header) == HEADER_SIZE
-    assert unpack_header(header) == (42, 3, 1, 100)
+def test_header_round_trip_includes_authenticated_session_id():
+    header = pack_header(7, 42, 3, 1, 100)
+    assert len(header) == HEADER_SIZE == 14
+    assert unpack_header(header) == (7, 42, 3, 1, 100)
+
+
+def test_session_id_zero_is_rejected():
+    assert not valid_session_id(0)
+    assert valid_session_id(1)
+    assert valid_session_id(0xFFFFFFFF)
+    with pytest.raises(ValueError, match="session_id"):
+        pack_header(0, 1, 1, 0, 10)
+
+
+def test_generated_session_ids_are_nonzero_uint32():
+    values = {_new_session_id() for _ in range(32)}
+    assert values
+    assert all(1 <= value <= 0xFFFFFFFF for value in values)
 
 
 def test_frame_id_replay_comparison_handles_wrap():

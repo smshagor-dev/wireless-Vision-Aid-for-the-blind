@@ -20,7 +20,7 @@ USB/local camera:
 ./quick_start.sh run vision --camera 0
 ```
 
-Smartphone/IP camera: use the exact trusted URL displayed by the phone app. WVAB no longer scans the local subnet for cameras.
+Smartphone/IP camera: use the exact trusted URL displayed by the phone app. WVAB does not scan the local subnet for cameras.
 
 ```bash
 ./quick_start.sh run phone http://192.168.1.20:8080/video --test-only
@@ -44,7 +44,9 @@ Flash `esp32_cam_stream.ino` with the generated `esp32_secrets.h` beside the ske
 ./quick_start.sh run esp32
 ```
 
-For station-mode Wi-Fi, pass `--station --ssid ... --wifi-password ... --server-ip ...` to the generator.
+The secure wire format uses a fresh non-zero sender session ID at each ESP32 boot/Python sender start. The complete 14-byte header is AES-GCM authenticated, authentication and frame replays are rejected, and a fresh authenticated session allows the frame counter to restart safely after a sender reboot. See `SECURE_UDP_PROTOCOL.md` for the exact contract.
+
+For station-mode Wi-Fi, pass `--station --ssid ... --wifi-password ... --server-ip ...` to the credential generator.
 
 ## 4. Optional MiDaS depth provisioning
 
@@ -52,7 +54,7 @@ For station-mode Wi-Fi, pass `--station --ssid ... --wifi-password ... --server-
 python tools/download_models.py midas
 ```
 
-The 85 MB MiDaS weight is not stored in the source tree. The downloader verifies its checksum and prepares the Torch Hub source cache.
+The MiDaS weight is not stored in the source tree. The downloader verifies its checksum and prepares the Torch Hub source cache for later offline depth startup.
 
 ## 5. Secure Python UDP server/client
 
@@ -63,11 +65,19 @@ For a Python camera sender instead of ESP32, export deployment-specific `WVAB_UD
 ./quick_start.sh run udp-client 127.0.0.1
 ```
 
-The canonical remote camera path is the authenticated/encrypted UDP runtime in `udp_streaming.py`.
+The quick-start UDP path forces authentication and encryption. `udp_streaming.py` remains the compatibility entrypoint; the transport/session implementation lives in `core/udp_runtime.py`.
 
-## 6. Root command dispatcher
+## 6. Raspberry Pi systemd service
 
-The repository root no longer points to nonexistent Android modules. Use:
+After setup and credential generation, keep the project `.venv` and install the service with:
+
+```bash
+sudo bash deployment/rpi/install_service.sh
+```
+
+The installer requires `.venv/bin/python` with Python 3.10+ and renders the service to use that interpreter. This prevents a rebooted service from accidentally running with a system Python that lacks WVAB dependencies.
+
+## 7. Root command dispatcher
 
 ```bash
 python main.py --help
@@ -77,7 +87,7 @@ python main.py phone http://192.168.1.20:8080/video --test-only
 python main.py udp-server --config wvab_config.sample.json
 ```
 
-## 7. C++ planner experiment
+## 8. C++ planner experiment
 
 ```bash
 cmake -S cpp -B cpp/build
@@ -85,3 +95,7 @@ cmake --build cpp/build --config Release
 ```
 
 The planner output is experimental and is not a certified mobility-safety controller. `cpp/build/` is intentionally ignored.
+
+## License note
+
+Original WVAB code is distributed under the repository MIT License. Third-party software/model/font assets retain their own licenses and terms; review `THIRD_PARTY_NOTICES.md` before redistribution or commercial deployment.

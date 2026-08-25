@@ -2,6 +2,7 @@
   "env": {
     "WVAB_UDP_ENCRYPT": "1",
     "WVAB_UDP_AUTH": "1",
+    "WVAB_ALLOW_INSECURE_UDP": "0",
     "WVAB_UDP_KEY_HEX": "",
     "WVAB_UDP_TOKEN": "",
     "WVAB_UDP_TRACKING": "1",
@@ -18,11 +19,11 @@
   "server_env": {
     "WVAB_UDP_HEADLESS": "1",
     "WVAB_UDP_HEALTH_PATH": "wvab_udp_server_health.json",
-    "WVAB_UDP_WATCHDOG_SERVER_IDLE_S": "30"
+    "WVAB_UDP_WATCHDOG_SERVER_FRAME_IDLE_S": "30"
   },
   "client_env": {
     "WVAB_UDP_HEALTH_PATH": "wvab_udp_client_health.json",
-    "WVAB_UDP_WATCHDOG_CLIENT_IDLE_S": "15"
+    "WVAB_UDP_WATCHDOG_CLIENT_SEND_IDLE_S": "15"
   },
   "server": {
     "host": "0.0.0.0",
