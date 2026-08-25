@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/controllers/app_controller.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/theme/ui_metrics.dart';
 
 class DetectionSettingsScreen extends StatefulWidget {
   const DetectionSettingsScreen({super.key, required this.controller});
@@ -18,12 +19,16 @@ class _DetectionSettingsScreenState extends State<DetectionSettingsScreen> {
 
   static const _classKeys = <String>[
     'person',
-    'vehicle',
+    'car',
+    'truck',
+    'bus',
     'bicycle',
     'motorcycle',
-    'obstacle',
-    'stairs',
-    'curb',
+    'traffic light',
+    'stop sign',
+    'chair',
+    'bench',
+    'potted plant',
   ];
 
   @override
@@ -41,72 +46,156 @@ class _DetectionSettingsScreenState extends State<DetectionSettingsScreen> {
       ),
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(widget.controller.strings.get('saveChanges'))));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(widget.controller.strings.get('saveChanges'))),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final strings = widget.controller.strings;
+    final standalone = widget.controller.standaloneStrings;
     return Scaffold(
       appBar: AppBar(title: Text(strings.get('detectionSettings'))),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: UiMetrics.lightPagePadding,
         children: [
-          Text(strings.get('confidenceThreshold'), style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('${strings.get('medium')} (${_confidence.toStringAsFixed(2)})', style: const TextStyle(fontWeight: FontWeight.w700)),
-                  Slider(
+          _SectionTitle(strings.get('confidenceThreshold')),
+          const SizedBox(height: 10),
+          _Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        strings.get('medium'),
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEAF3FF),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        _confidence.toStringAsFixed(2),
+                        style: const TextStyle(color: AppTheme.blue, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: AppTheme.blue,
+                    inactiveTrackColor: const Color(0xFFDDE3EC),
+                    thumbColor: AppTheme.blue,
+                    overlayColor: const Color(0x221976D2),
+                    trackHeight: 4,
+                  ),
+                  child: Slider(
                     value: _confidence,
                     min: 0.1,
-                    max: 1.0,
-                    divisions: 18,
-                    activeColor: AppTheme.blue,
+                    max: 0.95,
+                    divisions: 17,
                     onChanged: (value) => setState(() => _confidence = value),
                   ),
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [Text('0.1'), Text('1.0')],
-                  ),
-                ],
-              ),
+                ),
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('0.10', style: TextStyle(color: AppTheme.muted, fontWeight: FontWeight.w600)),
+                    Text('0.95', style: TextStyle(color: AppTheme.muted, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 24),
-          Text(strings.get('detectClasses'), style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
-          Card(
+          const SizedBox(height: 22),
+          _SectionTitle(strings.get('detectClasses')),
+          const SizedBox(height: 10),
+          _Panel(
+            padding: EdgeInsets.zero,
             child: Column(
-              children: _classKeys.map((key) {
-                return CheckboxListTile(
-                  value: _classes.contains(key),
-                  title: Text(strings.get(key)),
-                  activeColor: AppTheme.blue,
-                  onChanged: (value) {
-                    setState(() {
-                      if (value == true) {
-                        _classes.add(key);
-                      } else {
-                        _classes.remove(key);
-                      }
-                    });
-                  },
+              children: _classKeys.asMap().entries.map((entry) {
+                final index = entry.key;
+                final key = entry.value;
+                return Column(
+                  children: [
+                    CheckboxListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 1),
+                      value: _classes.contains(key),
+                      title: Text(standalone.get(key), style: const TextStyle(fontWeight: FontWeight.w700)),
+                      activeColor: AppTheme.blue,
+                      controlAffinity: ListTileControlAffinity.trailing,
+                      secondary: Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEAF3FF),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.center_focus_strong_rounded, color: AppTheme.blue, size: 20),
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          if (value == true) {
+                            _classes.add(key);
+                          } else {
+                            _classes.remove(key);
+                          }
+                        });
+                      },
+                    ),
+                    if (index != _classKeys.length - 1) const Divider(height: 1, indent: 70),
+                  ],
                 );
               }).toList(),
             ),
           ),
           const SizedBox(height: 24),
-          FilledButton(
+          FilledButton.icon(
+            key: const Key('detection-save-button'),
             onPressed: _save,
-            child: Text(strings.get('saveChanges')),
+            icon: const Icon(Icons.save_outlined),
+            label: Text(strings.get('saveChanges')),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(text, style: const TextStyle(color: AppTheme.blue, fontWeight: FontWeight.w800, fontSize: 15));
+  }
+}
+
+class _Panel extends StatelessWidget {
+  const _Panel({required this.child, this.padding = const EdgeInsets.all(16)});
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(UiMetrics.cardRadius),
+        side: const BorderSide(color: AppTheme.border),
+      ),
+      child: Padding(padding: padding, child: child),
     );
   }
 }

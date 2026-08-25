@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../core/controllers/app_controller.dart';
+import '../../core/models/app_settings.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/theme/ui_metrics.dart';
 import '../camera/camera_screen.dart';
 import '../connection/connection_screen.dart';
 import '../history/history_screen.dart';
@@ -16,43 +18,70 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final strings = controller.strings;
+    final standalone = controller.standaloneStrings;
+    final usingPhone = controller.settings.cameraSource == CameraSourceType.phone;
+    final sourceReady = usingPhone || controller.esp32Configured;
+    final sourceLabel = usingPhone
+        ? standalone.get('phoneCamera')
+        : controller.esp32Configured
+            ? standalone.get('esp32Camera')
+            : standalone.get('pairingRequired');
     return Scaffold(
       backgroundColor: AppTheme.navy,
       body: SafeArea(
-        child: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFF081438), Color(0xFF050D27)],
-            ),
-          ),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(gradient: AppTheme.homeGradient),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(22, 8, 22, 14),
+            padding: UiMetrics.homePadding,
             child: Column(
               children: [
                 Align(
                   alignment: Alignment.centerRight,
-                  child: IconButton(
-                    key: const Key('language-button'),
-                    style: IconButton.styleFrom(foregroundColor: Colors.white),
-                    tooltip: strings.get('languageTitle'),
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(builder: (_) => LanguageScreen(controller: controller)),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.06),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
                     ),
-                    icon: const Icon(Icons.language_rounded, size: 28),
+                    child: IconButton(
+                      key: const Key('language-button'),
+                      padding: EdgeInsets.zero,
+                      style: IconButton.styleFrom(foregroundColor: Colors.white),
+                      tooltip: strings.get('languageTitle'),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(builder: (_) => LanguageScreen(controller: controller)),
+                      ),
+                      icon: const Icon(Icons.language_rounded, size: 25),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
                   strings.get('appName'),
-                  style: const TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.w900, letterSpacing: 1.5),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  strings.get('appSubtitle'),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 19, height: 1.3, fontWeight: FontWeight.w500),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 40,
+                    height: 1,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.6,
+                  ),
+                ),
+                const SizedBox(height: 9),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Text(
+                    strings.get('appSubtitle'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFFF3F6FF),
+                      fontSize: 19,
+                      height: 1.3,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ),
                 const Spacer(),
                 Semantics(
@@ -61,22 +90,24 @@ class HomeScreen extends StatelessWidget {
                   child: InkWell(
                     key: const Key('start-assistance-button'),
                     customBorder: const CircleBorder(),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(builder: (_) => CameraScreen(controller: controller)),
-                    ),
+                    onTap: sourceReady
+                        ? () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(builder: (_) => CameraScreen(controller: controller)),
+                            )
+                        : () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(builder: (_) => ConnectionScreen(controller: controller)),
+                            ),
                     child: Container(
-                      width: 168,
-                      height: 168,
+                      key: const Key('home-start-circle'),
+                      width: UiMetrics.homeActionDiameter,
+                      height: UiMetrics.homeActionDiameter,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        gradient: const LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [Color(0xFF147A50), Color(0xFF0E5B3D)],
-                        ),
-                        border: Border.all(color: const Color(0xFF34C77C), width: 4),
+                        gradient: AppTheme.startGradient,
+                        border: Border.all(color: AppTheme.greenBorder, width: 4),
                         boxShadow: const [
-                          BoxShadow(color: Color(0x5534C77C), blurRadius: 28, spreadRadius: 2),
+                          BoxShadow(color: Color(0x3034C77C), blurRadius: 40, spreadRadius: 8),
+                          BoxShadow(color: Color(0x5534C77C), blurRadius: 20, spreadRadius: 1),
                         ],
                       ),
                       child: Column(
@@ -87,7 +118,12 @@ class HomeScreen extends StatelessWidget {
                           Text(
                             strings.get('startAssistance'),
                             textAlign: TextAlign.center,
-                            style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.15, fontWeight: FontWeight.w800),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              height: 1.15,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ],
                       ),
@@ -99,6 +135,7 @@ class HomeScreen extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _HomeTile(
+                        key: const Key('home-settings-tile'),
                         icon: Icons.settings_outlined,
                         label: strings.get('settings'),
                         onTap: () => Navigator.of(context).push(
@@ -109,6 +146,7 @@ class HomeScreen extends StatelessWidget {
                     const SizedBox(width: 14),
                     Expanded(
                       child: _HomeTile(
+                        key: const Key('home-history-tile'),
                         icon: Icons.history_rounded,
                         label: strings.get('history'),
                         onTap: () => Navigator.of(context).push(
@@ -120,35 +158,49 @@ class HomeScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                  key: const Key('home-status-bar'),
+                  constraints: const BoxConstraints(minHeight: 54),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF091634),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: const Color(0xFF142755)),
+                    color: AppTheme.navyCard,
+                    borderRadius: BorderRadius.circular(UiMetrics.statusRadius),
+                    border: Border.all(color: AppTheme.navyBorder),
                   ),
                   child: Row(
                     children: [
-                      const ContainerDot(),
+                      Container(
+                        width: 9,
+                        height: 9,
+                        decoration: BoxDecoration(
+                          color: sourceReady ? AppTheme.greenBorder : const Color(0xFFFFA726),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          strings.get('notConnected'),
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                          sourceLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14),
                         ),
                       ),
                       IconButton(
                         visualDensity: VisualDensity.compact,
+                        tooltip: standalone.get('cameraSource'),
                         onPressed: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(builder: (_) => ConnectionScreen(controller: controller)),
                         ),
-                        icon: const Icon(Icons.cell_tower_rounded, color: Colors.white),
+                        icon: Icon(usingPhone ? Icons.smartphone_rounded : Icons.wifi_tethering_rounded,
+                            color: Colors.white, size: 22),
                       ),
                       IconButton(
                         visualDensity: VisualDensity.compact,
+                        tooltip: strings.get('languageTitle'),
                         onPressed: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(builder: (_) => LanguageScreen(controller: controller)),
                         ),
-                        icon: const Icon(Icons.translate_rounded, color: Colors.white),
+                        icon: const Icon(Icons.translate_rounded, color: Colors.white, size: 22),
                       ),
                     ],
                   ),
@@ -162,21 +214,8 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-class ContainerDot extends StatelessWidget {
-  const ContainerDot({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 9,
-      height: 9,
-      decoration: const BoxDecoration(color: AppTheme.red, shape: BoxShape.circle),
-    );
-  }
-}
-
 class _HomeTile extends StatelessWidget {
-  const _HomeTile({required this.icon, required this.label, required this.onTap});
+  const _HomeTile({super.key, required this.icon, required this.label, required this.onTap});
 
   final IconData icon;
   final String label;
@@ -185,21 +224,27 @@ class _HomeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(UiMetrics.cardRadius),
       onTap: onTap,
       child: Container(
-        height: 102,
+        height: UiMetrics.homeTileHeight,
         decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [Color(0xFF0D3B67), Color(0xFF0A2854)]),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0xFF16497B)),
+          gradient: AppTheme.homeTileGradient,
+          borderRadius: BorderRadius.circular(UiMetrics.cardRadius),
+          border: Border.all(color: AppTheme.tileBorder),
+          boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 10, offset: Offset(0, 4))],
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, color: Colors.white, size: 34),
             const SizedBox(height: 8),
-            Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
+            ),
           ],
         ),
       ),

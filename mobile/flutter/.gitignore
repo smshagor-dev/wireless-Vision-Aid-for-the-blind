@@ -8,6 +8,8 @@ build/
 coverage/
 .metadata
 android/
+.generated/
+assets/models/*.onnx
 *.iml
 .idea/
 .vscode/
