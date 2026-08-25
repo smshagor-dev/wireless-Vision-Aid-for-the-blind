@@ -1,0 +1,5 @@
+# Pinned build-time dependencies for generating the packaged WVAB ONNX model.
+# These dependencies are used only by developers/CI; they are not embedded as
+# a Python runtime in the Android application.
+ultralytics==8.4.113
+onnx==1.22.0

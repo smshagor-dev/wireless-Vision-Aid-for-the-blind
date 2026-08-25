@@ -1,7 +1,7 @@
 name: wvab_mobile
-description: Accessibility-first Android companion for Wireless Vision-Aid for the Blind.
+description: Standalone offline Android runtime for Wireless Vision-Aid for the Blind.
 publish_to: "none"
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ">=3.11.0 <4.0.0"
@@ -12,6 +12,12 @@ dependencies:
     sdk: flutter
   camera: ^0.12.0+2
   flutter_tts: ^4.2.5
+  flutter_onnxruntime: ^1.8.4
+  shared_preferences: ^2.5.5
+  flutter_secure_storage: ^11.0.0
+  cryptography: ^2.9.0
+  cryptography_flutter: ^2.3.4
+  image: ^4.9.2
 
 dev_dependencies:
   flutter_test:
@@ -28,3 +34,5 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/models/

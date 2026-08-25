@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/controllers/app_controller.dart';
+import '../../core/models/app_settings.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/ui_metrics.dart';
 import '../camera/camera_screen.dart';
@@ -17,6 +18,14 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final strings = controller.strings;
+    final standalone = controller.standaloneStrings;
+    final usingPhone = controller.settings.cameraSource == CameraSourceType.phone;
+    final sourceReady = usingPhone || controller.esp32Configured;
+    final sourceLabel = usingPhone
+        ? standalone.get('phoneCamera')
+        : controller.esp32Configured
+            ? standalone.get('esp32Camera')
+            : standalone.get('pairingRequired');
     return Scaffold(
       backgroundColor: AppTheme.navy,
       body: SafeArea(
@@ -81,9 +90,13 @@ class HomeScreen extends StatelessWidget {
                   child: InkWell(
                     key: const Key('start-assistance-button'),
                     customBorder: const CircleBorder(),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(builder: (_) => CameraScreen(controller: controller)),
-                    ),
+                    onTap: sourceReady
+                        ? () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(builder: (_) => CameraScreen(controller: controller)),
+                            )
+                        : () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(builder: (_) => ConnectionScreen(controller: controller)),
+                            ),
                     child: Container(
                       key: const Key('home-start-circle'),
                       width: UiMetrics.homeActionDiameter,
@@ -110,7 +123,6 @@ class HomeScreen extends StatelessWidget {
                               fontSize: 16,
                               height: 1.15,
                               fontWeight: FontWeight.w800,
-                              letterSpacing: 0.1,
                             ),
                           ),
                         ],
@@ -156,11 +168,18 @@ class HomeScreen extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      const ContainerDot(),
+                      Container(
+                        width: 9,
+                        height: 9,
+                        decoration: BoxDecoration(
+                          color: sourceReady ? AppTheme.greenBorder : const Color(0xFFFFA726),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          strings.get('notConnected'),
+                          sourceLabel,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14),
@@ -168,11 +187,12 @@ class HomeScreen extends StatelessWidget {
                       ),
                       IconButton(
                         visualDensity: VisualDensity.compact,
-                        tooltip: strings.get('connection'),
+                        tooltip: standalone.get('cameraSource'),
                         onPressed: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(builder: (_) => ConnectionScreen(controller: controller)),
                         ),
-                        icon: const Icon(Icons.cell_tower_rounded, color: Colors.white, size: 22),
+                        icon: Icon(usingPhone ? Icons.smartphone_rounded : Icons.wifi_tethering_rounded,
+                            color: Colors.white, size: 22),
                       ),
                       IconButton(
                         visualDensity: VisualDensity.compact,
@@ -190,19 +210,6 @@ class HomeScreen extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class ContainerDot extends StatelessWidget {
-  const ContainerDot({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 9,
-      height: 9,
-      decoration: const BoxDecoration(color: AppTheme.red, shape: BoxShape.circle),
     );
   }
 }
