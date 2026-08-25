@@ -3,10 +3,11 @@ services:
     build:
       context: .
     init: true
-    command: ["python", "udp_streaming.py", "server", "--config", "wvab_config.sample.json"]
+    command: ["bash", "deployment/rpi/wvab_edge_start.sh"]
     env_file:
       - ./deployment/rpi/wvab_edge.env
     environment:
+      WVAB_PYTHON_BIN: python
       WVAB_UDP_TTS: "0"
       WVAB_UDP_HEADLESS: "1"
       WVAB_UDP_WATCHDOG_SERVER_FRAME_IDLE_S: "30"
@@ -15,7 +16,7 @@ services:
       WVAB_WS_CONTROL: "0"
       YOLO_CONFIG_DIR: /tmp/Ultralytics
     ports:
-      - "9999:9999/udp"
+      - "${WVAB_UDP_PORT:-9999}:${WVAB_UDP_PORT:-9999}/udp"
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
