@@ -1,56 +1,78 @@
-# WVAB Mobile
+# WVAB Standalone Android Runtime
 
-WVAB Mobile is the Android companion application for Wireless Vision-Aid for the Blind.
+WVAB Mobile is the offline Android runtime for Wireless Vision-Aid for the Blind. The Android phone is the compute device: no Raspberry Pi, desktop server, cloud API, or HTTP backend is required for normal assistance.
 
-## Foundation scope
+## Runtime modes
 
-This first mobile wave provides:
+### Phone camera
 
-- accessibility-first Material 3 interface with large semantic controls
-- camera preview using the official Flutter `camera` plugin
-- spoken feedback abstraction backed by `flutter_tts`
-- built-in Android haptic feedback abstraction
-- Bengali, English, Russian, and Hindi speech-language selection
-- edge-server endpoint configuration with strict local validation
-- explicit transport state that does **not** pretend an edge connection exists before Secure UDP Protocol v2 is implemented
-- deterministic Android host-project bootstrap
-- Flutter analyze, widget tests, and split debug APK builds in CI
+```text
+Android camera -> YUV420 -> local preprocessing -> packaged ONNX detector
+               -> source-space detections -> relative proximity -> TTS / haptics
+```
 
-Secure UDP Protocol v2 integration and on-device ONNX inference are intentionally separate follow-up waves. The mobile app must not introduce an unauthenticated/plaintext fallback for wearable deployment.
+This mode requires no network connection after installation.
+
+### ESP32-CAM
+
+```text
+ESP32-CAM -> local Wi-Fi -> Secure UDP Protocol v2 -> AES-GCM decrypt
+          -> JPEG frame reassembly -> packaged ONNX detector
+          -> relative proximity -> TTS / haptics
+```
+
+Internet access is not required. ESP32-CAM pairing requires a 16/24/32-byte AES key and an authentication token of at least 16 characters. Credentials are stored with Android secure storage. Replay counters and ordinary preferences are persisted separately.
+
+## First launch
+
+The first launch asks for:
+
+1. Interface / voice language: English, বাংলা, Русский, or हिन्दी.
+2. Camera source: Phone Camera or ESP32-CAM.
+3. ESP32 secure pairing values when ESP32-CAM is selected.
+
+These choices are stored locally and can be changed later from Settings, Camera Source, and Language.
+
+## Offline model build
+
+The repository contains the pinned source checkpoint `../../yolov8n.pt`. Before building the APK, generate and validate the packaged ONNX asset:
+
+```bash
+python -m pip install -r tool/model-export-requirements.txt
+python tool/export_mobile_model.py
+```
+
+The exporter creates:
+
+```text
+assets/models/yolov8n_320.onnx
+.generated/mobile_model_manifest.json
+```
+
+The graph must expose a static `[1, 3, 320, 320]` input and a raw YOLO detection output containing 84 channels. Runtime code loads only the packaged asset. It does not download a model and does not fall back to a remote backend.
 
 ## Toolchain
 
 - Flutter 3.47.0
 - Dart 3.11+
-- Android SDK 24+ (required by the current Flutter camera plugin)
+- Android SDK 24+
+- flutter_onnxruntime 1.8.4 / ONNX Runtime 1.23 runtime wrapper
+- build-time Ultralytics 8.4.113 + ONNX 1.22.0
 
 ## Develop
 
 ```bash
 cd mobile/flutter
+python -m pip install -r tool/model-export-requirements.txt
+python tool/export_mobile_model.py
 flutter pub get
 flutter analyze
 flutter test
-```
-
-## Generate the Android host project
-
-The Android host is generated rather than vendored so it follows the pinned Flutter template. Run:
-
-```bash
-cd mobile/flutter
 bash tool/bootstrap_android.sh
-```
-
-The bootstrap script creates the Android project, enforces Android SDK 24, and adds only the permissions currently required by this foundation: camera, internet, and vibration.
-
-Then build architecture-specific debug APKs:
-
-```bash
 flutter build apk --debug --split-per-abi
 ```
 
-Expected outputs include:
+Expected outputs:
 
 ```text
 build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk
@@ -58,22 +80,20 @@ build/app/outputs/flutter-apk/app-armeabi-v7a-debug.apk
 build/app/outputs/flutter-apk/app-x86_64-debug.apk
 ```
 
+CI verifies the ONNX graph and checksum manifest, Android permissions/minimum SDK, professional launcher branding, Flutter analyzer/tests, encrypted ESP32 protocol tests, and the split APK outputs.
+
 ## Repository demo APK
 
-A CI-built 64-bit ARM demo APK is kept in the repository for convenient installation on compatible Android phones:
+The existing repository demo path is:
 
 ```text
 mobile/flutter/demo/wvab-mobile-demo-arm64-v8a.apk
 ```
 
-The demo is generated only after Flutter analysis, tests, Android host contract checks, APK compilation, and the repository-size guard pass. Verify it against:
-
-```text
-mobile/flutter/demo/SHA256SUMS.txt
-```
-
-The repository demo targets `arm64-v8a`. Use the CI artifacts or build locally when a different Android ABI is required.
+A standalone runtime build may exceed GitHub's normal 100 MB per-file repository limit because it contains the native ONNX Runtime library and packaged detector. When that happens, use the GitHub Actions APK artifact instead of committing an oversized binary to Git.
 
 ## Safety status
 
-The app is an assistive/research prototype. Camera preview, speech, and vibration availability are not evidence that a route is safe. Metric distance/navigation claims remain subject to the calibration and validation gates documented in the repository root.
+WVAB uses qualitative relative proximity (`immediate`, `close`, `medium`, `far`) derived from detection-box scale. It does **not** claim calibrated metric distance from a monocular camera.
+
+The application remains an assistive prototype, not a certified navigation or safety device. Repository/CI validation demonstrates software behavior only. Physical Android handset performance, real ESP32-CAM radio behavior, thermals, battery life, sustained frame rate, latency, and user-safety outcomes require separate hardware validation.
