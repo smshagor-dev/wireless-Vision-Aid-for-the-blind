@@ -25,10 +25,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -107,6 +107,8 @@ jobs:
         run: |
           python tools/generate_device_secrets.py --help >/dev/null
           python tools/download_models.py --help >/dev/null
+          python tools/soak_monitor.py --help >/dev/null
+          python tools/summarize_soak.py --help >/dev/null
           python test_system.py --help >/dev/null
           python main.py --help >/dev/null
           python smartphone_camera.py --help >/dev/null
@@ -173,7 +175,7 @@ jobs:
           grep -Fx 'esp32_secrets.h' .dockerignore >/dev/null
           grep -Fx 'deployment/rpi/wvab_edge.env' .dockerignore >/dev/null
           grep -Eq '^USER[[:space:]]+wvab$' Dockerfile
-          if git grep -n -E 'WVAB_UDP_AUTH[=:][[:space:]]*0|0102030405060708090A0B0C0D0E0F10' -- ':!*.example.*'; then
+          if git grep -n -E 'WVAB_UDP_AUTH[=:][[:space:]]*0|0102030405060708090A0B0C0D0E0F10' -- ':!*.example.*' ':!.github/workflows/ci.yml'; then
             echo "Insecure deployment default found in tracked source/docs."
             exit 1
           fi
@@ -191,7 +193,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configure
         run: cmake -S cpp -B build-cpp -DCMAKE_BUILD_TYPE=Release
@@ -207,7 +209,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v2
