@@ -101,7 +101,7 @@ void main() {
     expect(find.byKey(const Key('start-assistance-button')), findsOneWidget);
     expect(find.text('Settings'), findsOneWidget);
     expect(find.text('History'), findsOneWidget);
-    expect(find.text('Phone Camera'), findsOneWidget);
+    expect(find.text('Phone camera'), findsOneWidget);
 
     final circleSize = tester.getSize(find.byKey(const Key('home-start-circle')));
     expect(circleSize.width, UiMetrics.homeActionDiameter);
@@ -149,7 +149,8 @@ void main() {
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('settings-list')), findsOneWidget);
+    final settingsList = find.byKey(const Key('settings-list'));
+    expect(settingsList, findsOneWidget);
     expect(
       tester.getSize(find.byKey(const Key('settings-bottom-nav'))).height,
       UiMetrics.settingsBottomBarHeight,
@@ -158,7 +159,10 @@ void main() {
     await tester.scrollUntilVisible(
       find.byKey(const Key('settings-save-button')),
       300,
-      scrollable: find.byKey(const Key('settings-list')),
+      scrollable: find.descendant(
+        of: settingsList,
+        matching: find.byType(Scrollable),
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('settings-save-button')), findsOneWidget);
