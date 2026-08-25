@@ -201,3 +201,29 @@ jobs:
 
       - name: Run planner demo
         run: ./build-cpp/navigation_demo
+
+  esp32-firmware:
+    name: ESP32-CAM firmware build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install pinned ESP32 Arduino core
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.11
+
+      - name: Prepare deterministic sketch directory
+        run: |
+          mkdir -p build-sketch/esp32_cam_stream
+          cp esp32_cam_stream.ino build-sketch/esp32_cam_stream/esp32_cam_stream.ino
+          cp esp32_secrets.example.h build-sketch/esp32_cam_stream/esp32_secrets.example.h
+
+      - name: Compile ESP32-CAM firmware
+        run: arduino-cli compile --fqbn esp32:esp32:esp32:PSRAM=enabled build-sketch/esp32_cam_stream
