@@ -18,6 +18,20 @@ def configure_manifest() -> None:
         if marker not in text:
             raise SystemExit('Unexpected AndroidManifest.xml template')
         text = text.replace(marker, marker + permissions, 1)
+
+    if 'android.intent.action.TTS_SERVICE' not in text:
+        application_marker = '    <application'
+        if application_marker not in text:
+            raise SystemExit('Unexpected AndroidManifest.xml application template')
+        queries = (
+            '    <queries>\n'
+            '        <intent>\n'
+            '            <action android:name="android.intent.action.TTS_SERVICE" />\n'
+            '        </intent>\n'
+            '    </queries>\n'
+        )
+        text = text.replace(application_marker, queries + application_marker, 1)
+
     MANIFEST.write_text(text, encoding='utf-8')
 
 
