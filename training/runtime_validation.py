@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 from typing import Any
 
@@ -39,8 +40,6 @@ def validate_dataset_yaml(path: str, *, require_train: bool = False) -> dict[str
 
     dataset_root = Path(data.get("path", ".")).expanduser()
     if not dataset_root.is_absolute():
-        # Ultralytics resolves dataset path relative to the working directory for
-        # this repository. Make that expectation explicit and deterministic.
         dataset_root = (Path.cwd() / dataset_root).resolve()
 
     required_splits = ["val"]
@@ -67,4 +66,34 @@ def validate_export_format(export_format: str) -> str:
     if normalized not in SUPPORTED_EXPORT_FORMATS:
         allowed = ", ".join(sorted(SUPPORTED_EXPORT_FORMATS))
         raise ValueError(f"unsupported export format '{export_format}'; choose one of: {allowed}")
+    return normalized
+
+
+def _require_module(module_name: str, install_hint: str) -> None:
+    if importlib.util.find_spec(module_name) is None:
+        raise RuntimeError(f"required export dependency '{module_name}' is missing. {install_hint}")
+
+
+def require_export_backend(export_format: str, *, simplify: bool = False) -> str:
+    normalized = validate_export_format(export_format)
+    accelerator_hint = "Install requirements-accelerators.txt first."
+
+    if normalized == "onnx":
+        _require_module("onnx", accelerator_hint)
+        if simplify:
+            _require_module("onnxslim", accelerator_hint)
+    elif normalized == "openvino":
+        _require_module("openvino", accelerator_hint)
+    elif normalized == "engine":
+        _require_module("onnx", accelerator_hint)
+        _require_module("tensorrt", "Install a TensorRT build compatible with the deployed CUDA stack.")
+        try:
+            import torch
+        except Exception as exc:
+            raise RuntimeError("PyTorch is required for TensorRT export") from exc
+        if not torch.cuda.is_available():
+            raise RuntimeError("TensorRT export requires a CUDA-capable runtime")
+        if simplify:
+            _require_module("onnxslim", accelerator_hint)
+
     return normalized
