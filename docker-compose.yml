@@ -9,7 +9,7 @@ services:
     environment:
       WVAB_UDP_TTS: "0"
       WVAB_UDP_HEADLESS: "1"
-      WVAB_UDP_WATCHDOG_SERVER_IDLE_S: "0"
+      WVAB_UDP_WATCHDOG_SERVER_FRAME_IDLE_S: "30"
       WVAB_UDP_LOG_PATH: /tmp/wvab_udp_server.log
       WVAB_UDP_HEALTH_PATH: /tmp/wvab_udp_server_health.json
       WVAB_WS_CONTROL: "0"
@@ -26,7 +26,7 @@ services:
         - CMD
         - python
         - -c
-        - "import json,time; p=json.load(open('/tmp/wvab_udp_server_health.json')); assert time.time()-float(p['ts']) < 20"
+        - "import json,time; p=json.load(open('/tmp/wvab_udp_server_health.json')); assert time.time()-float(p['ts']) < 20; assert float(p['last_completed_frame_s']) < 25"
       interval: 10s
       timeout: 3s
       retries: 3
