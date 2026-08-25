@@ -57,6 +57,7 @@ jobs:
               "assets/fonts/NotoNaskhArabic-Regular.ttf",
               "core/config.py",
               "core/udp_protocol.py",
+              "core/udp_runtime.py",
               "mapping/occupancy_grid.py",
               "navigation/a_star.py",
               "perception/depth_estimator.py",
@@ -89,6 +90,7 @@ jobs:
           python test_system.py --help >/dev/null
           python main.py --help >/dev/null
           python smartphone_camera.py --help >/dev/null
+          python udp_streaming.py --help >/dev/null
           python train_navigation_model.py --help >/dev/null
           python export_accelerated_models.py --help >/dev/null
 
@@ -107,6 +109,12 @@ jobs:
               raise SystemExit("ESP32 auth/frame encryption must authenticate the UDP header as GCM AAD")
           if "esp_http_server" in source or "startCameraServer" in source:
               raise SystemExit("Unauthenticated ESP32 MJPEG fallback must not be present in the release firmware")
+          if "const uint16_t HEADER_SIZE = 14;" not in source:
+              raise SystemExit("ESP32 secure UDP header must include the 32-bit session identifier")
+          if "uint32_t session_id = 0;" not in source or "session_id = esp_random();" not in source:
+              raise SystemExit("ESP32 must generate a fresh non-zero session id at boot")
+          if "build_header(header, session_id, AUTH_FRAME_ID" not in source:
+              raise SystemExit("ESP32 authentication packet must bind its session id")
           if "udp.write(base_nonce, NONCE_SIZE);" not in source:
               raise SystemExit("ESP32 encrypted packets must carry their frame base nonce")
           PY
