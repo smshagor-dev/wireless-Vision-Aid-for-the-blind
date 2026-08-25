@@ -56,6 +56,8 @@ jobs:
               "assets/fonts/NotoSansDevanagari-Regular.ttf",
               "assets/fonts/NotoNaskhArabic-Regular.ttf",
               "core/config.py",
+              "core/object_policy.py",
+              "core/udp_auth_state.py",
               "core/udp_protocol.py",
               "core/udp_runtime.py",
               "mapping/occupancy_grid.py",
@@ -63,6 +65,8 @@ jobs:
               "perception/depth_estimator.py",
               "training/runtime_validation.py",
               "tools/download_models.py",
+              "tools/soak_monitor.py",
+              "tools/summarize_soak.py",
               "vision_server.py",
               "udp_streaming.py",
           }
@@ -85,6 +89,7 @@ jobs:
             cd "$tmpdir"
             python - <<'PY'
           from importlib.resources import files
+          from core.udp_auth_state import decode_auth_payload, encode_auth_payload
           from core.udp_protocol import HEADER_SIZE, pack_header, unpack_header
           from core.udp_runtime import _new_session_id
 
@@ -92,6 +97,8 @@ jobs:
           header = pack_header(session_id, 1, 1, 0, 32)
           assert HEADER_SIZE == 14
           assert unpack_header(header) == (session_id, 1, 1, 0, 32)
+          auth = encode_auth_payload("installed-package-token", 1, 0)
+          assert decode_auth_payload(auth) == ("installed-package-token", 1, 0)
           assert files("assets").joinpath("fonts/NotoSansBengali-Regular.ttf").is_file()
           PY
           )
@@ -116,7 +123,7 @@ jobs:
           python train_navigation_model.py --help >/dev/null
           python export_accelerated_models.py --help >/dev/null
 
-      - name: Validate ESP32 secure protocol contract
+      - name: Validate ESP32 secure protocol-v2 contract
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -129,16 +136,22 @@ jobs:
           )
           if len(calls) != 2:
               raise SystemExit("ESP32 auth/frame encryption must authenticate the UDP header as GCM AAD")
+          required = (
+              "const uint16_t HEADER_SIZE = 14;",
+              "const uint8_t AUTH_PAYLOAD_VERSION = 2;",
+              "uint32_t session_id = 0;",
+              "uint64_t auth_counter = 0;",
+              "session_id = esp_random();",
+              "build_header(header, session_id, AUTH_FRAME_ID",
+              "write_u64(cleartext + 1, next_auth_counter);",
+              "write_u32(cleartext + 9, frame_id);",
+              "udp.write(base_nonce, NONCE_SIZE);",
+          )
+          missing = [item for item in required if item not in source]
+          if missing:
+              raise SystemExit(f"ESP32 protocol-v2 contract is incomplete: {missing}")
           if "esp_http_server" in source or "startCameraServer" in source:
               raise SystemExit("Unauthenticated ESP32 MJPEG fallback must not be present in the release firmware")
-          if "const uint16_t HEADER_SIZE = 14;" not in source:
-              raise SystemExit("ESP32 secure UDP header must include the 32-bit session identifier")
-          if "uint32_t session_id = 0;" not in source or "session_id = esp_random();" not in source:
-              raise SystemExit("ESP32 must generate a fresh non-zero session id at boot")
-          if "build_header(header, session_id, AUTH_FRAME_ID" not in source:
-              raise SystemExit("ESP32 authentication packet must bind its session id")
-          if "udp.write(base_nonce, NONCE_SIZE);" not in source:
-              raise SystemExit("ESP32 encrypted packets must carry their frame base nonce")
           PY
 
       - name: Validate container deployment contract
@@ -147,7 +160,11 @@ jobs:
           set -euo pipefail
           grep -F 'command: ["bash", "deployment/rpi/wvab_edge_start.sh"]' docker-compose.yml >/dev/null
           grep -F '${WVAB_UDP_PORT:-9999}:${WVAB_UDP_PORT:-9999}/udp' docker-compose.yml >/dev/null
+          grep -F 'WVAB_UDP_REPLAY_STATE_PATH: /var/lib/wvab/udp_replay_state.json' docker-compose.yml >/dev/null
+          grep -F 'wvab-replay-state:/var/lib/wvab' docker-compose.yml >/dev/null
+          grep -F 'wvab-replay-state:' docker-compose.yml >/dev/null
           grep -F 'docker compose --env-file "$ENV_FILE"' deployment/docker_start.sh >/dev/null
+          grep -F 'WVAB_UDP_REPLAY_STATE_PATH=state/udp_replay_state.json' tools/generate_device_secrets.py >/dev/null
           if git grep -n -E 'WVAB_UDP_WATCHDOG_SERVER_IDLE_S|WVAB_UDP_WATCHDOG_CLIENT_IDLE_S' -- wvab_config.sample.json docker-compose.yml deployment; then
             echo "Obsolete watchdog variable remains in deployment/config files."
             exit 1
@@ -172,6 +189,13 @@ jobs:
             echo "$secrets"
             exit 1
           fi
+          replay_state=$(git ls-files | grep -E '(^|/)udp_replay_state\.json$|^state/' || true)
+          if [[ -n "$replay_state" ]]; then
+            echo "Runtime replay state is tracked:"
+            echo "$replay_state"
+            exit 1
+          fi
+          grep -Fx 'state/' .gitignore >/dev/null
           grep -Fx 'esp32_secrets.h' .dockerignore >/dev/null
           grep -Fx 'deployment/rpi/wvab_edge.env' .dockerignore >/dev/null
           grep -Eq '^USER[[:space:]]+wvab$' Dockerfile
