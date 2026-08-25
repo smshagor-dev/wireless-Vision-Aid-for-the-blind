@@ -1,7 +1,10 @@
 # WVAB Mobile Demo APK
 
-`wvab-mobile-demo-arm64-v8a.apk` is the CI-built Android debug demo for 64-bit ARM devices.
+The latest republished Android demo is `wvab-mobile-demo-arm64-v8a-2026-08-26.apk`.
 
+The original `wvab-mobile-demo-arm64-v8a.apk` is retained for compatibility. Both files contain the same validated CI-built Android debug demo for 64-bit ARM devices.
+
+- Republished: 2026-08-26
 - UI: WVAB navy/green multilingual redesign
 - Languages: English, Bangla, Russian, Hindi
 - Build type: Flutter debug APK
