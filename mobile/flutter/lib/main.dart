@@ -11,7 +11,7 @@ import 'core/vision/mobile_inference_engine.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  Cryptography.instance = FlutterCryptography.defaultInstance;
+  FlutterCryptography.enable();
 
   final controller = AppController(
     speechService: FlutterTtsSpeechService(),
