@@ -39,8 +39,9 @@ activate_env() {
 }
 
 require_udp_credentials() {
-  if [[ -z "${WVAB_UDP_TOKEN:-}" ]]; then
-    echo "ERROR: export a unique WVAB_UDP_TOKEN before using UDP mode." >&2
+  local token="${WVAB_UDP_TOKEN:-}"
+  if (( ${#token} < 16 )); then
+    echo "ERROR: export a unique WVAB_UDP_TOKEN of at least 16 characters before using UDP mode." >&2
     exit 2
   fi
   if [[ ! "${WVAB_UDP_KEY_HEX:-}" =~ ^([0-9A-Fa-f]{32}|[0-9A-Fa-f]{48}|[0-9A-Fa-f]{64})$ ]]; then
@@ -51,12 +52,13 @@ require_udp_credentials() {
 
 run_doctor() {
   activate_env
-  python "${ROOT_DIR}/test_system.py"
+  python "${ROOT_DIR}/test_system.py" "$@"
 }
 
-run_esp32() {
+run_esp32_edge() {
   activate_env
-  python "${ROOT_DIR}/vision_server.py"
+  export WVAB_PYTHON_BIN="$(command -v python)"
+  bash "${ROOT_DIR}/deployment/rpi/wvab_edge_start.sh"
 }
 
 run_phone() {
@@ -86,19 +88,24 @@ WVAB quick start
 
 Usage:
   ./quick_start.sh setup
-  ./quick_start.sh doctor
+  ./quick_start.sh doctor [--full] [--camera SOURCE] [--tts] [--deployment]
   ./quick_start.sh run esp32
   ./quick_start.sh run phone
   ./quick_start.sh run udp-server
   ./quick_start.sh run udp-client [server_ip]
 
-Secure UDP modes require these environment variables first:
+ESP32 edge mode uses the generated deployment/rpi/wvab_edge.env file:
+  python tools/generate_device_secrets.py --server-ip 192.168.4.2
+  ./quick_start.sh doctor --deployment
+  ./quick_start.sh run esp32
+
+Python UDP modes require these environment variables:
   WVAB_UDP_KEY_HEX=<16/24/32-byte hex key>
-  WVAB_UDP_TOKEN=<unique token>
+  WVAB_UDP_TOKEN=<unique token, at least 16 chars>
 
 Examples:
   ./quick_start.sh setup
-  ./quick_start.sh doctor
+  ./quick_start.sh doctor --full --camera 0
   ./quick_start.sh run esp32
   ./quick_start.sh run phone
   ./quick_start.sh run udp-server
@@ -110,11 +117,14 @@ main() {
   local cmd="${1:-help}"
   case "${cmd}" in
     setup) setup_env ;;
-    doctor) run_doctor ;;
+    doctor)
+      shift
+      run_doctor "$@"
+      ;;
     run)
       local mode="${2:-}"
       case "${mode}" in
-        esp32) run_esp32 ;;
+        esp32) run_esp32_edge ;;
         phone) run_phone ;;
         udp-server) run_udp_server ;;
         udp-client) run_udp_client "${3:-}" ;;

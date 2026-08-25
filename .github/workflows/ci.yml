@@ -51,6 +51,7 @@ jobs:
         run: |
           python tools/generate_device_secrets.py --help >/dev/null
           python tools/download_models.py --help >/dev/null
+          python test_system.py --help >/dev/null
 
       - name: Run unit tests
         run: python -m pytest -q

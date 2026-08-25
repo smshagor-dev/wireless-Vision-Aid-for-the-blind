@@ -1,6 +1,6 @@
 # WVAB Quick Start
 
-## 1. Setup and diagnostics
+## 1. Setup and deterministic diagnostics
 
 WVAB requires Python 3.10+.
 
@@ -9,12 +9,13 @@ WVAB requires Python 3.10+.
 ./quick_start.sh doctor
 ```
 
-Normal camera helpers:
+The default doctor is offline-first and non-interactive. It does not require Internet connectivity or claim that hardware is field-safe. For deeper host validation:
 
 ```bash
-./quick_start.sh run esp32
-./quick_start.sh run phone
+./quick_start.sh doctor --full --camera 0 --tts
 ```
+
+`--full` runs a local YOLO dummy-frame inference; `--camera` verifies a real camera/stream; `--tts` initializes the host TTS engine without asserting audible output.
 
 ## 2. Pair an ESP32-CAM with Raspberry Pi
 
@@ -22,12 +23,13 @@ Generate matching, git-ignored device credentials instead of editing keys into s
 
 ```bash
 python tools/generate_device_secrets.py --server-ip 192.168.4.2
+./quick_start.sh doctor --deployment
 ```
 
-Flash `esp32_cam_stream.ino` with the generated `esp32_secrets.h` in the sketch directory, then start the edge server:
+Flash `esp32_cam_stream.ino` with the generated `esp32_secrets.h` beside the sketch, then start the authenticated AES-GCM edge path:
 
 ```bash
-bash deployment/rpi/wvab_edge_start.sh
+./quick_start.sh run esp32
 ```
 
 For station-mode Wi-Fi, pass `--station --ssid ... --wifi-password ... --server-ip ...` to the generator.
@@ -44,11 +46,11 @@ The downloader verifies the model checksum and prepares the Torch Hub source cac
 
 ## 4. Secure Python UDP server/client
 
-If the sender is another Python client instead of ESP32, generate/export deployment-specific credentials and then run:
+If the sender is another Python client instead of ESP32, export deployment-specific credentials and then run:
 
 ```bash
-python udp_streaming.py server --config wvab_config.sample.json
-python udp_streaming.py client --config wvab_config.sample.json --server-ip 127.0.0.1 --camera 0
+./quick_start.sh run udp-server
+./quick_start.sh run udp-client 127.0.0.1
 ```
 
 The runtime refuses encrypted/authenticated mode when key/token configuration is invalid. WebSocket control is loopback-only by default and requires a token for every command.
