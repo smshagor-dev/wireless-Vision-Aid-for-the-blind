@@ -314,15 +314,16 @@ class _SettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      elevation: 0.5,
+      shadowColor: const Color(0x18000000),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(UiMetrics.cardRadius),
-        border: Border.all(color: AppTheme.border),
-        boxShadow: const [BoxShadow(color: Color(0x08000000), blurRadius: 10, offset: Offset(0, 3))],
+        side: const BorderSide(color: AppTheme.border),
       ),
-      child: child,
+      child: Padding(padding: padding, child: child),
     );
   }
 }
