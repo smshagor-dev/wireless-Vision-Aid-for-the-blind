@@ -76,12 +76,32 @@ jobs:
       - name: Validate package install
         run: python -m pip install --no-deps --force-reinstall dist-ci/wvab_system-*.whl
 
+      - name: Validate installed package outside checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d)"
+          (
+            cd "$tmpdir"
+            python - <<'PY'
+          from importlib.resources import files
+          from core.udp_protocol import HEADER_SIZE, pack_header, unpack_header
+          from core.udp_runtime import _new_session_id
+
+          session_id = _new_session_id()
+          header = pack_header(session_id, 1, 1, 0, 32)
+          assert HEADER_SIZE == 14
+          assert unpack_header(header) == (session_id, 1, 1, 0, 32)
+          assert files("assets").joinpath("fonts/NotoSansBengali-Regular.ttf").is_file()
+          PY
+          )
+
       - name: Compile Python source
         run: python -m compileall -q -x '(^|/)(cpp/build|__pycache__)(/|$)' .
 
       - name: Validate shell scripts
         shell: bash
-        run: bash -n quick_start.sh deployment/rpi/*.sh
+        run: bash -n quick_start.sh deployment/docker_start.sh deployment/rpi/*.sh
 
       - name: Validate lightweight CLIs
         run: |
@@ -118,6 +138,18 @@ jobs:
           if "udp.write(base_nonce, NONCE_SIZE);" not in source:
               raise SystemExit("ESP32 encrypted packets must carry their frame base nonce")
           PY
+
+      - name: Validate container deployment contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'command: ["bash", "deployment/rpi/wvab_edge_start.sh"]' docker-compose.yml >/dev/null
+          grep -F '${WVAB_UDP_PORT:-9999}:${WVAB_UDP_PORT:-9999}/udp' docker-compose.yml >/dev/null
+          grep -F 'docker compose --env-file "$ENV_FILE"' deployment/docker_start.sh >/dev/null
+          if git grep -n -E 'WVAB_UDP_WATCHDOG_SERVER_IDLE_S|WVAB_UDP_WATCHDOG_CLIENT_IDLE_S' -- wvab_config.sample.json docker-compose.yml deployment; then
+            echo "Obsolete watchdog variable remains in deployment/config files."
+            exit 1
+          fi
 
       - name: Run unit tests
         run: python -m pytest -q
