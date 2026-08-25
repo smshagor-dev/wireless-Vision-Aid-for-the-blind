@@ -19,6 +19,8 @@
   "server_env": {
     "WVAB_UDP_HEADLESS": "1",
     "WVAB_UDP_HEALTH_PATH": "wvab_udp_server_health.json",
+    "WVAB_UDP_REPLAY_STATE_PATH": "state/udp_replay_state.json",
+    "WVAB_UDP_REPLAY_MAX_SESSIONS": "4096",
     "WVAB_UDP_WATCHDOG_SERVER_FRAME_IDLE_S": "30"
   },
   "client_env": {
