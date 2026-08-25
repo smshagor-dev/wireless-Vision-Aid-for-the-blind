@@ -36,6 +36,13 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     }
   }
 
+  CameraDescription _selectCamera(List<CameraDescription> cameras) {
+    for (final camera in cameras) {
+      if (camera.lensDirection == CameraLensDirection.back) return camera;
+    }
+    return cameras.first;
+  }
+
   Future<void> _initializeCamera() async {
     if (mounted) {
       setState(() {
@@ -47,17 +54,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
-        throw const CameraException('noCamera', 'No camera is available on this device.');
+        throw CameraException('noCamera', 'No camera is available on this device.');
       }
 
-      final selected = cameras.cast<CameraDescription?>().firstWhere(
-            (camera) => camera?.lensDirection == CameraLensDirection.back,
-            orElse: () => cameras.first,
-          ) ??
-          cameras.first;
-
       final controller = CameraController(
-        selected,
+        _selectCamera(cameras),
         ResolutionPreset.medium,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.yuv420,
@@ -81,7 +82,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         _error = error.description ?? error.code;
         _initializing = false;
       });
-    } catch (error) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _error = 'Camera could not start.';
