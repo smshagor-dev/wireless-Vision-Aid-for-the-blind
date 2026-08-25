@@ -47,7 +47,7 @@ jobs:
 
       - name: Preserve manual-run source artifact
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wvab-source
           path: ${{ steps.package.outputs.artifact }}
