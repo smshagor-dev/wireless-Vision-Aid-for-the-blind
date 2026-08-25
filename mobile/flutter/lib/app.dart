@@ -18,8 +18,7 @@ class WvabMobileApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           title: 'WVAB Mobile',
           theme: AppTheme.light(),
-          darkTheme: AppTheme.dark(),
-          themeMode: ThemeMode.system,
+          themeMode: ThemeMode.light,
           home: HomeScreen(controller: controller),
         );
       },
