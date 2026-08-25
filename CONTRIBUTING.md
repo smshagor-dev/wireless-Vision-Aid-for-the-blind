@@ -1,60 +1,67 @@
-<!--
-Name: Md. Shahanur Islam Shagor
-Autonomous Systems & UAV Researcher | Cybersecurity Specialist | Software Engineer
-Voronezh State University of Forestry and Technologies
-Build for Blind people within 15$
--->
-
 # Contributing
 
 ## Local setup
+
+WVAB requires Python 3.10+.
+
 ```bash
 python -m venv .venv
 ```
 
 Windows:
+
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
 Linux/macOS:
+
 ```bash
 source .venv/bin/activate
 ```
 
-Install:
+Install runtime dependencies:
+
 ```bash
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-## Test before PR
+For lightweight unit/CI work only:
+
 ```bash
-pytest tests -q
-python -m test_system.py
+python -m pip install -r requirements-ci.txt
 ```
+
+## Test before a PR
+
+Run device-independent validation:
+
+```bash
+python -m pytest -q
+python -m compileall -q .
+python test_system.py
+python udp_streaming.py --help
+```
+
+If the change affects hardware/runtime behavior, also run the relevant opt-in diagnostics on a suitable host and record the result. Do not report hardware, safety, latency, or field-readiness evidence that was not actually measured.
 
 ## Coding guidelines
-- Keep changes small and reviewable.
-- Preserve existing runtime behavior unless intentionally changing it.
-- Update docs when changing config, run commands, or architecture.
-- Avoid adding hardcoded credentials or secrets.
 
-## Commit message style
-Use clear prefixes:
-- `Add:` new feature
-- `Fix:` bug fix
-- `Update:` behavior/doc update
-- `Refactor:` internal cleanup
-- `Test:` test changes
-- `Docs:` documentation only
-
-Examples:
-- `Fix: handle missing MQTT broker without crash`
-- `Update: GUI route animation and SVG assets`
+- Keep changes reviewable and preserve supported runtime behavior unless the change is intentional and documented.
+- Keep `udp_streaming.py` as the compatibility entrypoint; transport/session implementation lives in `core/udp_runtime.py` and wire constants live in `core/udp_protocol.py`.
+- Keep the Python sender/server and `esp32_cam_stream.ino` on the same documented secure UDP wire contract.
+- Treat bounding-box/MiDaS monocular proximity as non-metric unless explicit calibration requirements are satisfied.
+- Keep device credentials, generated datasets/models, build output, caches, and runtime logs out of Git.
+- Never add shared example production secrets or disable authentication/encryption in supported deployment paths.
+- Update tests and documentation whenever config, protocol, deployment, or CLI behavior changes.
 
 ## Pull request checklist
-- [ ] Tests pass locally
-- [ ] Docs updated
-- [ ] No secrets committed
-- [ ] Config changes documented
-- [ ] Screenshots/log snippets included for UI/runtime changes
+
+- [ ] Core tests pass on supported Python versions or the runner limitation is documented.
+- [ ] Python source compiles and lightweight CLIs parse successfully.
+- [ ] Secure UDP protocol changes include Python + ESP32 + protocol-doc + test updates together.
+- [ ] Package/wheel content remains complete.
+- [ ] No secrets/generated artifacts are tracked.
+- [ ] Config/deployment changes are documented.
+- [ ] Hardware-dependent claims include real validation evidence rather than assumptions.
