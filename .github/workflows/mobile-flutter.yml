@@ -1,0 +1,79 @@
+name: Mobile Flutter
+
+on:
+  push:
+    branches:
+      - main
+      - mobile-app-foundation
+    paths:
+      - mobile/flutter/**
+      - .github/workflows/mobile-flutter.yml
+  pull_request:
+    paths:
+      - mobile/flutter/**
+      - .github/workflows/mobile-flutter.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-flutter-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flutter-mobile:
+    name: Flutter analyze, test, and debug APK
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: mobile/flutter
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter 3.47.0
+        uses: subosito/flutter-action@v2.23.0
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart source
+        run: flutter analyze
+
+      - name: Run Flutter tests
+        run: flutter test
+
+      - name: Generate Android host project
+        run: bash tool/bootstrap_android.sh
+
+      - name: Verify Android security and SDK contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'minSdk = 24' android/app/build.gradle.kts >/dev/null
+          grep -F 'android.permission.CAMERA' android/app/src/main/AndroidManifest.xml >/dev/null
+          grep -F 'android.permission.INTERNET' android/app/src/main/AndroidManifest.xml >/dev/null
+          grep -F 'android.permission.VIBRATE' android/app/src/main/AndroidManifest.xml >/dev/null
+          grep -F 'android.intent.action.TTS_SERVICE' android/app/src/main/AndroidManifest.xml >/dev/null
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Verify APK artifact
+        shell: bash
+        run: test -s build/app/outputs/flutter-apk/app-debug.apk
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: wvab-mobile-debug-${{ github.sha }}
+          path: mobile/flutter/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
