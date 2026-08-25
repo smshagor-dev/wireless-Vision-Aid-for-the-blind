@@ -53,6 +53,7 @@ jobs:
               raise SystemExit(f"expected exactly one WVAB wheel, found: {wheels}")
           required = {
               "core/config.py",
+              "core/udp_protocol.py",
               "mapping/occupancy_grid.py",
               "navigation/a_star.py",
               "perception/depth_estimator.py",
@@ -87,6 +88,25 @@ jobs:
           python smartphone_camera.py --help >/dev/null
           python train_navigation_model.py --help >/dev/null
           python export_accelerated_models.py --help >/dev/null
+
+      - name: Validate ESP32 secure protocol contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          source = Path("esp32_cam_stream.ino").read_text(encoding="utf-8")
+          calls = re.findall(
+              r"mbedtls_gcm_crypt_and_tag\([\s\S]*?header,\s*HEADER_SIZE,",
+              source,
+          )
+          if len(calls) != 2:
+              raise SystemExit("ESP32 auth/frame encryption must authenticate the UDP header as GCM AAD")
+          if "esp_http_server" in source or "startCameraServer" in source:
+              raise SystemExit("Unauthenticated ESP32 MJPEG fallback must not be present in the release firmware")
+          if "udp.write(base_nonce, NONCE_SIZE);" not in source:
+              raise SystemExit("ESP32 encrypted packets must carry their frame base nonce")
+          PY
 
       - name: Run unit tests
         run: python -m pytest -q
