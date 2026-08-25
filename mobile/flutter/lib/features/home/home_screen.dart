@@ -147,7 +147,7 @@ class HomeScreen extends StatelessWidget {
                 const SizedBox(height: 14),
                 Container(
                   key: const Key('home-status-bar'),
-                  minHeight: 54,
+                  constraints: const BoxConstraints(minHeight: 54),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                   decoration: BoxDecoration(
                     color: AppTheme.navyCard,
