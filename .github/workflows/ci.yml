@@ -37,8 +37,17 @@ jobs:
       - name: Install CI dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-ci.txt
 
-      - name: Compile source
+      - name: Compile Python source
         run: python -m compileall -q -x '(^|/)(cpp/build|__pycache__)(/|$)' .
+
+      - name: Validate shell scripts
+        shell: bash
+        run: bash -n quick_start.sh deployment/rpi/*.sh
+
+      - name: Validate standard-library tooling
+        run: |
+          python tools/generate_device_secrets.py --help >/dev/null
+          python tools/download_models.py --help >/dev/null
 
       - name: Run unit tests
         run: python -m pytest -q
@@ -51,5 +60,15 @@ jobs:
           if [[ -n "$bad" ]]; then
             echo "Generated artifacts are tracked:"
             echo "$bad"
+            exit 1
+          fi
+          secrets=$(git ls-files | grep -E '(^|/)esp32_secrets\.h$|^deployment/rpi/wvab_edge\.env$' || true)
+          if [[ -n "$secrets" ]]; then
+            echo "Local credential files are tracked:"
+            echo "$secrets"
+            exit 1
+          fi
+          if git grep -n -E 'WVAB_UDP_AUTH[=:][[:space:]]*0|0102030405060708090A0B0C0D0E0F10' -- ':!*.example.*'; then
+            echo "Insecure deployment default found in tracked source/docs."
             exit 1
           fi

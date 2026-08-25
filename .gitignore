@@ -48,8 +48,9 @@ data/custom_wvab/
 # Local secrets/config overrides
 .env
 .env.*
-!deployment/rpi/wvab_edge.env
 wvab_config.local.json
+esp32_secrets.h
+deployment/rpi/wvab_edge.env
 
 # Derived model/export formats
 *.onnx

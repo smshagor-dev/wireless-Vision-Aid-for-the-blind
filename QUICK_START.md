@@ -16,7 +16,23 @@ Normal camera helpers:
 ./quick_start.sh run phone
 ```
 
-## 2. Optional MiDaS depth provisioning
+## 2. Pair an ESP32-CAM with Raspberry Pi
+
+Generate matching, git-ignored device credentials instead of editing keys into source:
+
+```bash
+python tools/generate_device_secrets.py --server-ip 192.168.4.2
+```
+
+Flash `esp32_cam_stream.ino` with the generated `esp32_secrets.h` in the sketch directory, then start the edge server:
+
+```bash
+bash deployment/rpi/wvab_edge_start.sh
+```
+
+For station-mode Wi-Fi, pass `--station --ssid ... --wifi-password ... --server-ip ...` to the generator.
+
+## 3. Optional MiDaS depth provisioning
 
 The 85 MB MiDaS weight is not stored in the source tree. To prepare depth support for later offline use, run once while online after installing runtime dependencies:
 
@@ -26,40 +42,18 @@ python tools/download_models.py midas
 
 The downloader verifies the model checksum and prepares the Torch Hub source cache. Core YOLO object detection remains available from the local `yolov8n.pt` baseline without MiDaS.
 
-## 3. Secure UDP server/client
+## 4. Secure Python UDP server/client
 
-Generate deployment-specific credentials and export them before using UDP mode:
-
-```bash
-export WVAB_UDP_KEY_HEX="$(python - <<'PY'
-import os
-print(os.urandom(32).hex())
-PY
-)"
-export WVAB_UDP_TOKEN="$(python - <<'PY'
-import secrets
-print(secrets.token_urlsafe(24))
-PY
-)"
-```
-
-Then start the server and sender:
+If the sender is another Python client instead of ESP32, generate/export deployment-specific credentials and then run:
 
 ```bash
-./quick_start.sh run udp-server
-./quick_start.sh run udp-client 192.168.1.10
+python udp_streaming.py server --config wvab_config.sample.json
+python udp_streaming.py client --config wvab_config.sample.json --server-ip 127.0.0.1 --camera 0
 ```
 
-The quick-start script refuses UDP mode when the token is blank or the AES key length is invalid. WebSocket control is loopback-only by default and uses `WVAB_WS_TOKEN` when set, otherwise it reuses `WVAB_UDP_TOKEN`.
+The runtime refuses encrypted/authenticated mode when key/token configuration is invalid. WebSocket control is loopback-only by default and requires a token for every command.
 
-## 4. C++ planner experiment
-
-Files:
-
-- `cpp/navigation_planner.h`
-- `cpp/navigation_planner.cpp`
-
-The C++ demo produces directional/stop-style planner outputs from detection heuristics. These outputs are experimental and are not a certified mobility-safety controller.
+## 5. C++ planner experiment
 
 Build with CMake:
 
@@ -68,11 +62,11 @@ cmake -S cpp -B cpp/build
 cmake --build cpp/build --config Release
 ```
 
-Or build the demo directly with g++:
+Or directly with g++:
 
 ```bash
 g++ -std=c++17 -O2 -Icpp cpp/navigation_planner.cpp cpp/main_demo.cpp -o navigation_demo
 ./navigation_demo
 ```
 
-`cpp/build/` is intentionally ignored and must not be committed.
+The planner output is experimental and is not a certified mobility-safety controller. `cpp/build/` is intentionally ignored.
