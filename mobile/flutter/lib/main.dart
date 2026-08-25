@@ -1,4 +1,3 @@
-import 'package:cryptography_flutter/cryptography_flutter.dart';
 import 'package:flutter/material.dart';
 
 import 'app.dart';
@@ -11,7 +10,6 @@ import 'core/vision/mobile_inference_engine.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  FlutterCryptography.enable();
 
   final controller = AppController(
     speechService: FlutterTtsSpeechService(),
