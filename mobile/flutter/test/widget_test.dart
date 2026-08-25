@@ -5,6 +5,7 @@ import 'package:wvab_mobile/core/controllers/app_controller.dart';
 import 'package:wvab_mobile/core/services/edge_connection_service.dart';
 import 'package:wvab_mobile/core/services/feedback_service.dart';
 import 'package:wvab_mobile/core/services/speech_service.dart';
+import 'package:wvab_mobile/core/theme/ui_metrics.dart';
 
 class _FakeSpeechService implements SpeechService {
   @override
@@ -40,7 +41,7 @@ AppController _controller() {
 }
 
 void main() {
-  testWidgets('home matches assistance-first layout and honest connection state', (tester) async {
+  testWidgets('home matches approved assistance-first proportions', (tester) async {
     final controller = _controller();
     await controller.initialize();
 
@@ -51,6 +52,25 @@ void main() {
     expect(find.text('Settings'), findsOneWidget);
     expect(find.text('History'), findsOneWidget);
     expect(find.text('Not Connected'), findsOneWidget);
+
+    final circleSize = tester.getSize(find.byKey(const Key('home-start-circle')));
+    expect(circleSize.width, UiMetrics.homeActionDiameter);
+    expect(circleSize.height, UiMetrics.homeActionDiameter);
+    expect(tester.getSize(find.byKey(const Key('home-settings-tile'))).height, UiMetrics.homeTileHeight);
+    expect(tester.getSize(find.byKey(const Key('home-history-tile'))).height, UiMetrics.homeTileHeight);
+  });
+
+  testWidgets('home remains overflow-free on compact phone viewport', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(360, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final controller = _controller();
+    await controller.initialize();
+    await tester.pumpWidget(WvabMobileApp(controller: controller));
+
+    expect(find.byKey(const Key('home-start-circle')), findsOneWidget);
+    expect(find.byKey(const Key('home-status-bar')), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('language selection changes the whole app interface', (tester) async {
@@ -69,5 +89,21 @@ void main() {
     expect(find.text('সেটিংস'), findsOneWidget);
     expect(find.text('ইতিহাস'), findsOneWidget);
     expect(find.text('সংযুক্ত নয়'), findsOneWidget);
+  });
+
+  testWidgets('settings uses the approved fixed bottom navigation height', (tester) async {
+    final controller = _controller();
+    await controller.initialize();
+
+    await tester.pumpWidget(WvabMobileApp(controller: controller));
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('settings-list')), findsOneWidget);
+    expect(find.byKey(const Key('settings-save-button')), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(const Key('settings-bottom-nav'))).height,
+      UiMetrics.settingsBottomBarHeight,
+    );
   });
 }
