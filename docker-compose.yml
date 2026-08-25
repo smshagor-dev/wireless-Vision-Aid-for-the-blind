@@ -13,10 +13,13 @@ services:
       WVAB_UDP_WATCHDOG_SERVER_FRAME_IDLE_S: "30"
       WVAB_UDP_LOG_PATH: /tmp/wvab_udp_server.log
       WVAB_UDP_HEALTH_PATH: /tmp/wvab_udp_server_health.json
+      WVAB_UDP_REPLAY_STATE_PATH: /var/lib/wvab/udp_replay_state.json
       WVAB_WS_CONTROL: "0"
       YOLO_CONFIG_DIR: /tmp/Ultralytics
     ports:
       - "${WVAB_UDP_PORT:-9999}:${WVAB_UDP_PORT:-9999}/udp"
+    volumes:
+      - wvab-replay-state:/var/lib/wvab
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -72,3 +75,6 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  wvab-replay-state:
