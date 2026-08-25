@@ -185,3 +185,19 @@ jobs:
             echo "Unsupported legacy runtime/training entrypoint reintroduced."
             exit 1
           fi
+
+  cpp-build:
+    name: C++17 planner build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S cpp -B build-cpp -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build-cpp --config Release --parallel 2
+
+      - name: Run planner demo
+        run: ./build-cpp/navigation_demo
