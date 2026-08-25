@@ -145,7 +145,7 @@ def main():
 
     header = f'''#pragma once\n#include <stdint.h>\n\n#define WVAB_SECRETS_CONFIGURED 1\n#define WVAB_USE_AP_MODE {str(use_ap).lower()}\n#define WVAB_AP_SSID {c_string(args.ap_ssid)}\n#define WVAB_AP_PASSWORD {c_string(ap_password)}\n#define WVAB_WIFI_SSID {c_string(args.ssid)}\n#define WVAB_WIFI_PASSWORD {c_string(args.wifi_password)}\n#define WVAB_UDP_HOST {c_string(str(args.server_ip).strip())}\n#define WVAB_UDP_PORT {args.port}\n#define WVAB_UDP_TOKEN {c_string(udp_token)}\n\nstatic const uint8_t WVAB_AES_KEY[32] = {{{byte_list}}};\n'''
 
-    env = f'''WVAB_OFFLINE=1\nWVAB_UDP_ENCRYPT=1\nWVAB_UDP_AUTH=1\nWVAB_ALLOW_INSECURE_UDP=0\nWVAB_UDP_KEY_HEX={key.hex()}\nWVAB_UDP_TOKEN={udp_token}\nWVAB_UDP_AUTH_TTL_S=120\nWVAB_UDP_HEADLESS=1\nWVAB_UDP_TTS=1\nWVAB_UDP_TTS_RATE=170\nWVAB_UDP_LOG_PATH=wvab_udp_rpi.log\nWVAB_UDP_HEALTH_PATH=wvab_udp_server_health.json\nWVAB_UDP_WATCHDOG_SERVER_IDLE_S=30\nWVAB_UDP_TRACKING=1\nWVAB_WS_CONTROL=1\nWVAB_WS_CONTROL_HOST=127.0.0.1\nWVAB_WS_CONTROL_PORT=8765\nWVAB_WS_TOKEN={ws_token}\n'''
+    env = f'''WVAB_OFFLINE=1\nWVAB_UDP_ENCRYPT=1\nWVAB_UDP_AUTH=1\nWVAB_ALLOW_INSECURE_UDP=0\nWVAB_UDP_PORT={args.port}\nWVAB_UDP_KEY_HEX={key.hex()}\nWVAB_UDP_TOKEN={udp_token}\nWVAB_UDP_AUTH_TTL_S=120\nWVAB_UDP_HEADLESS=1\nWVAB_UDP_TTS=1\nWVAB_UDP_TTS_RATE=170\nWVAB_UDP_LOG_PATH=wvab_udp_rpi.log\nWVAB_UDP_HEALTH_PATH=wvab_udp_server_health.json\nWVAB_UDP_WATCHDOG_SERVER_IDLE_S=30\nWVAB_UDP_TRACKING=1\nWVAB_WS_CONTROL=1\nWVAB_WS_CONTROL_HOST=127.0.0.1\nWVAB_WS_CONTROL_PORT=8765\nWVAB_WS_TOKEN={ws_token}\n'''
 
     write_pair_atomic([(header_path, header), (env_path, env)])
 
