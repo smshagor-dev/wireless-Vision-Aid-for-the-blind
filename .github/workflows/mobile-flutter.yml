@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: mobile-flutter-${{ github.workflow }}-${{ github.ref }}
@@ -34,6 +34,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
 
       - name: Set up Flutter 3.47.0
         uses: subosito/flutter-action@v2.23.0
@@ -90,8 +92,8 @@ jobs:
           import json
 
           branding = {
-              Path('.generated/wvab_launcher.png'): 'b1a3b209775db713543a5c81ab28212edcf5c2dcfe39a60d33f917f03315296a',
-              Path('.generated/wvab_launcher_foreground.png'): 'ad4cbb708b8aa3380129c7c65fc0ecc4409dce2d4fdf4ebe8d83847e9a8caf69',
+              Path('.generated/wvab_launcher.png'): '3dd7859dabcc70ea7b5b8069b46b532a85924239b29d27e7aa7344ebe6467c43',
+              Path('.generated/wvab_launcher_foreground.png'): '97aea4f3229f4fef747ab1d531dfec8e2bd3df5ea12157d5f3865190f10ea574',
           }
           for path, digest in branding.items():
               actual = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -128,3 +130,37 @@ jobs:
           path: mobile/flutter/build/app/outputs/flutter-apk/*-debug.apk
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish rebuilt arm64 demo to PR branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'mobile-demo-new-icon-rebuild' && github.actor != 'github-actions[bot]'
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="demo/wvab-mobile-demo-arm64-v8a.apk"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk "$target"
+          sha256sum "$target" | sed 's#  demo/#  #' > demo/SHA256SUMS.txt
+          cat > demo/README.md <<'EOF'
+          # WVAB Mobile Demo APK
+
+          `wvab-mobile-demo-arm64-v8a.apk` is the freshly rebuilt Android debug demo for 64-bit ARM devices.
+
+          - Launcher icon: restored from the committed WVAB branding source under `tool/branding/`
+          - Languages: English, Bangla, Russian, Hindi
+          - Build type: Flutter debug APK
+          - ABI: arm64-v8a
+          - Minimum Android SDK: 24
+          - Validation: Flutter analyze, widget tests, Android host contract checks, launcher-branding checksum validation, split APK build and APK verification all pass before publication.
+
+          Verify the APK against `SHA256SUMS.txt` after download.
+
+          Secure UDP Protocol v2 mobile streaming and object inference are not represented as active until implemented and validated. This is an assistive prototype, not a certified navigation or safety device.
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add demo/README.md demo/SHA256SUMS.txt "$target"
+          if git diff --cached --quiet; then
+            echo "Demo APK is already current."
+            exit 0
+          fi
+          git commit -m "Publish rebuilt WVAB demo with restored launcher icon [skip ci]"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}

@@ -1,17 +1,19 @@
 # WVAB Mobile Demo APK
 
-The latest republished Android demo is `wvab-mobile-demo-arm64-v8a-2026-08-26.apk`.
+The stale demo APKs that contained the regressed launcher icon have been removed.
 
-The original `wvab-mobile-demo-arm64-v8a.apk` is retained for compatibility. Both files contain the same validated CI-built Android debug demo for 64-bit ARM devices.
+This branch restores the committed WVAB launcher artwork under `tool/branding/` as the source of truth and rebuilds the Android demo from that icon source in CI.
 
-- Republished: 2026-08-26
-- UI: WVAB navy/green multilingual redesign
-- Languages: English, Bangla, Russian, Hindi
-- Build type: Flutter debug APK
-- ABI: arm64-v8a
-- Minimum Android SDK: 24
-- Validation: Flutter analyze, widget tests, Android host contract checks, split APK build and APK verification all pass before publication.
+The CI publication step writes the fresh 64-bit ARM APK back to this folder as:
 
-Verify the APK against `SHA256SUMS.txt` after download.
+`wvab-mobile-demo-arm64-v8a.apk`
 
-Secure UDP Protocol v2 mobile streaming and object inference are not represented as active until implemented and validated. This is an assistive prototype, not a certified navigation or safety device.
+Build contract:
+
+- WVAB committed launcher artwork is materialized from `tool/branding/`
+- adaptive launcher foreground uses the matching committed source
+- Flutter analyze and widget tests must pass
+- Android host and launcher checksums must pass
+- split APK build and APK verification must pass before publication
+
+The resulting APK is an assistive prototype and is not a certified navigation or safety device.
