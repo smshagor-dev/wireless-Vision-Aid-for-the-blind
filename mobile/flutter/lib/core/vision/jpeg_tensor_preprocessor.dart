@@ -2,12 +2,14 @@ import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
+import 'vision_input.dart';
+
 class JpegTensorPreprocessor {
   const JpegTensorPreprocessor({this.inputSize = 320});
 
   final int inputSize;
 
-  Float32List preprocess(Uint8List jpegBytes) {
+  PreparedVisionInput preprocess(Uint8List jpegBytes) {
     final image = img.decodeJpg(jpegBytes);
     if (image == null || image.width <= 0 || image.height <= 0) {
       throw const FormatException('ESP32 frame is not a valid JPEG image.');
@@ -38,6 +40,16 @@ class JpegTensorPreprocessor {
         tensor[2 * pixels + index] = pixel.b.toDouble() / 255.0;
       }
     }
-    return tensor;
+    return PreparedVisionInput(
+      tensor: tensor,
+      transform: LetterboxTransform(
+        inputSize: inputSize,
+        sourceWidth: image.width,
+        sourceHeight: image.height,
+        scale: scale,
+        padX: padX,
+        padY: padY,
+      ),
+    );
   }
 }
