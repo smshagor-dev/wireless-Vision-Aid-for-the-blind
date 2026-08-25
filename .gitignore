@@ -36,6 +36,10 @@ wvab_*_health.json
 navigation_state.json
 *.tmp
 
+# Validation evidence (may contain host/runtime metadata)
+evidence/*.csv
+evidence/*.json
+
 # Training / export artifacts
 runs/
 data/custom_wvab/
