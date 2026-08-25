@@ -28,7 +28,7 @@ class HomeScreen extends StatelessWidget {
             ),
           ),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(22, 12, 22, 20),
+            padding: const EdgeInsets.fromLTRB(22, 8, 22, 14),
             child: Column(
               children: [
                 Align(
@@ -43,16 +43,16 @@ class HomeScreen extends StatelessWidget {
                     icon: const Icon(Icons.language_rounded, size: 28),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
                 Text(
                   strings.get('appName'),
-                  style: const TextStyle(color: Colors.white, fontSize: 42, fontWeight: FontWeight.w900, letterSpacing: 1.5),
+                  style: const TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.w900, letterSpacing: 1.5),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 Text(
                   strings.get('appSubtitle'),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 20, height: 1.35, fontWeight: FontWeight.w500),
+                  style: const TextStyle(color: Colors.white, fontSize: 19, height: 1.3, fontWeight: FontWeight.w500),
                 ),
                 const Spacer(),
                 Semantics(
@@ -65,8 +65,8 @@ class HomeScreen extends StatelessWidget {
                       MaterialPageRoute<void>(builder: (_) => CameraScreen(controller: controller)),
                     ),
                     child: Container(
-                      width: 184,
-                      height: 184,
+                      width: 168,
+                      height: 168,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         gradient: const LinearGradient(
@@ -82,12 +82,12 @@ class HomeScreen extends StatelessWidget {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.graphic_eq_rounded, color: Colors.white, size: 48),
-                          const SizedBox(height: 10),
+                          const Icon(Icons.graphic_eq_rounded, color: Colors.white, size: 44),
+                          const SizedBox(height: 8),
                           Text(
                             strings.get('startAssistance'),
                             textAlign: TextAlign.center,
-                            style: const TextStyle(color: Colors.white, fontSize: 17, height: 1.15, fontWeight: FontWeight.w800),
+                            style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.15, fontWeight: FontWeight.w800),
                           ),
                         ],
                       ),
@@ -118,9 +118,9 @@ class HomeScreen extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 14),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
                   decoration: BoxDecoration(
                     color: const Color(0xFF091634),
                     borderRadius: BorderRadius.circular(18),
@@ -188,7 +188,7 @@ class _HomeTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(18),
       onTap: onTap,
       child: Container(
-        height: 116,
+        height: 102,
         decoration: BoxDecoration(
           gradient: const LinearGradient(colors: [Color(0xFF0D3B67), Color(0xFF0A2854)]),
           borderRadius: BorderRadius.circular(18),
@@ -197,9 +197,9 @@ class _HomeTile extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: Colors.white, size: 38),
-            const SizedBox(height: 10),
-            Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
+            Icon(icon, color: Colors.white, size: 34),
+            const SizedBox(height: 8),
+            Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
           ],
         ),
       ),
