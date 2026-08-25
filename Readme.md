@@ -22,6 +22,7 @@ WVAB is an offline-first computer-vision assistance platform for blind and low-v
 - Occupancy-grid mapping and A* planning research pipeline
 - Fail-safe `STOP` / `DEGRADED` / `GUIDANCE_AVAILABLE` state output
 - OpenVINO/TensorRT export utilities
+- Non-root Docker runtime with local-secret build exclusions
 - Deterministic lightweight CI tests plus opt-in full integration smoke tests
 
 ## Requirements
@@ -55,26 +56,52 @@ python test_system.py
 python vision_server.py
 ```
 
-For secure UDP streaming, generate deployment-specific credentials first:
+For ESP32-CAM + Raspberry Pi pairing, generate matching local credentials rather than editing secrets into source:
 
 ```bash
-python - <<'PY'
-import os, secrets
-print("WVAB_UDP_KEY_HEX=" + os.urandom(32).hex())
-print("WVAB_UDP_TOKEN=" + secrets.token_urlsafe(24))
-PY
+python tools/generate_device_secrets.py --server-ip 192.168.4.2
 ```
 
-Export those values in your environment before starting the server/client. The sample config intentionally contains blank credentials so a deployment fails closed instead of silently using a shared example secret.
+That creates git-ignored `esp32_secrets.h` and `deployment/rpi/wvab_edge.env`. Flash the firmware with the generated header, then start the edge server:
+
+```bash
+bash deployment/rpi/wvab_edge_start.sh
+```
+
+For a Python UDP sender/client, export a unique `WVAB_UDP_KEY_HEX` and `WVAB_UDP_TOKEN` and run:
 
 ```bash
 python udp_streaming.py server --config wvab_config.sample.json
 python udp_streaming.py client --config wvab_config.sample.json
 ```
 
+## Docker
+
+Docker is intended for headless server or controlled navigation experiments, not direct access to host desktop audio/GUI.
+
+First create the local server credential file; it is loaded by Compose at runtime and excluded from the Docker build context:
+
+```bash
+python tools/generate_device_secrets.py --server-ip 192.168.4.2
+docker compose build
+docker compose up -d udp-vision-server
+```
+
+The image runs as non-root user `wvab`, `.dockerignore` excludes local credentials, and the default Compose service exposes only UDP `9999`. TTS and WebSocket control are disabled inside the container by default.
+
+The optional navigation/metrics profile requires a Linux camera device. Set the host video-group ID explicitly when it differs from `44`:
+
+```bash
+export WVAB_VIDEO_GID="$(getent group video | cut -d: -f3)"
+export WVAB_CAMERA_DEVICE=/dev/video0
+docker compose --profile navigation up -d navigation-engine prometheus
+```
+
+Navigation runs headless in this profile. Prometheus binds only to host loopback at `127.0.0.1:9090`; the navigation metrics endpoint is likewise exposed only on loopback at `127.0.0.1:8000`.
+
 ## WebSocket control
 
-WebSocket control is enabled by default but binds only to `127.0.0.1:8765`. Every command requires a shared secret. `WVAB_WS_TOKEN` is preferred; when it is blank, the server falls back to `WVAB_UDP_TOKEN`.
+WebSocket control is enabled by default for the native UDP server but binds only to `127.0.0.1:8765`. Every command requires a shared secret. `WVAB_WS_TOKEN` is preferred; when it is blank, the server falls back to `WVAB_UDP_TOKEN`.
 
 For local control, send the token with every JSON command:
 
@@ -103,7 +130,7 @@ MiDaS output is monocular and scale-ambiguous. The navigation pipeline therefore
 - `DEGRADED`: a path exists but geometry is not calibrated for metric use
 - `GUIDANCE_AVAILABLE`: a path exists using an explicitly calibrated metric mapping source
 
-This replaces the previous placeholder motor-stop function. Hardware-specific audio/haptic/actuator adapters should consume this state and implement their own certified fail-safe behavior.
+This state file is an integration boundary, not a certified actuator controller. Hardware-specific audio/haptic/actuator adapters require their own validation.
 
 ## Multilingual fonts and speech
 
@@ -132,10 +159,11 @@ sudo apt install -y python3-pip python3-venv espeak-ng libatlas-base-dev
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python tools/generate_device_secrets.py --server-ip 192.168.4.2
 bash deployment/rpi/wvab_edge_start.sh
 ```
 
-`deployment/rpi/wvab_edge_start.sh` refuses to start when UDP authentication/encryption is disabled, the token is blank, or the AES key is invalid. WebSocket control stays loopback-only by default.
+`deployment/rpi/wvab_edge_start.sh` refuses to start when credentials are absent/invalid or UDP authentication/encryption is disabled. `deployment/rpi/install_service.sh` renders a service for the actual checkout path instead of relying on a hard-coded `/home/pi/...` path.
 
 ## Training and export
 
@@ -165,11 +193,11 @@ Full runtime smoke import is opt-in because it requires heavyweight ML/device de
 WVAB_FULL_SMOKE=1 python -m pytest tests/test_smoke.py -q
 ```
 
-GitHub Actions runs core tests on Python 3.10, 3.11, and 3.12 and rejects tracked cache/build/log artifacts.
+GitHub Actions runs core tests on Python 3.10, 3.11, and 3.12, validates shell/tool syntax, rejects tracked cache/build/log/secret artifacts, and rejects known insecure deployment defaults.
 
 ## Repository hygiene
 
-Generated Python caches, CMake/Visual Studio build output, runtime logs, health files, local datasets, downloaded depth assets, and derived export files are ignored. New/derived model weights should be distributed through verified provisioning or versioned release artifacts instead of being committed directly.
+Generated Python caches, CMake/Visual Studio build output, runtime logs, health files, local datasets, downloaded depth assets, local ESP32/Pi credentials, and derived export files are ignored. `.dockerignore` additionally prevents those local credentials from being copied into image build contexts.
 
 ## Production-readiness gates
 
@@ -185,7 +213,7 @@ Before describing a build as field-ready, record and publish evidence for at lea
 - battery/thermal behavior on the target edge device
 - blind/low-vision user evaluation under an approved study protocol
 
-See `PRODUCTION_READINESS.md` for the release gate checklist.
+See `PRODUCTION_READINESS.md` and `production.md` for release/deployment gates.
 
 ## License
 

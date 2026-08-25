@@ -1,6 +1,6 @@
 # WVAB Field Deployment Guide
 
-WVAB is a research/assistive prototype, not a certified mobility or medical device. This guide describes the supported secure ESP32-CAM -> Raspberry Pi deployment path. It does not make a field-safety claim.
+WVAB is a research/assistive prototype, not a certified mobility or medical device. This guide describes supported deployment paths without making a field-safety claim.
 
 ## 1. Install the Raspberry Pi runtime
 
@@ -48,13 +48,7 @@ python tools/generate_device_secrets.py \
 
 Open `esp32_cam_stream.ino` in Arduino IDE with `esp32_secrets.h` beside it. Select the AI Thinker ESP32-CAM board and flash the firmware.
 
-The supported UDP path now:
-
-1. validates that non-placeholder secrets are configured,
-2. sends an encrypted authentication packet,
-3. refreshes authentication periodically,
-4. encrypts every video chunk with AES-GCM using a fresh random 96-bit frame nonce,
-5. never prints the Wi-Fi password, UDP token, or AES key to serial output.
+The supported UDP path validates non-placeholder secrets, sends encrypted authentication packets, refreshes authentication periodically, and encrypts every video chunk with AES-GCM using fresh frame nonces. The firmware does not print Wi-Fi passwords, UDP tokens, or AES keys to serial output.
 
 The unauthenticated MJPEG server remains a development-only fallback in source and is disabled by default.
 
@@ -64,11 +58,11 @@ The unauthenticated MJPEG server remains a development-only fallback in source a
 bash deployment/rpi/wvab_edge_start.sh
 ```
 
-The launcher refuses to start when the credential file is missing, authentication/encryption is disabled, the token is too short, the AES key is malformed, or the model is missing.
+The launcher refuses to start when the credential file is missing, authentication/encryption is disabled, the token is too short, the AES key is malformed, or the YOLO model is missing.
 
 ## 5. Optional systemd service
 
-The repository no longer contains a hard-coded `/home/pi/...` service. Install a service rendered for the current checkout/user:
+The repository does not use a hard-coded `/home/pi/...` service. Install one rendered for the current checkout/user:
 
 ```bash
 sudo bash deployment/rpi/install_service.sh
@@ -83,9 +77,31 @@ journalctl -u wvab_edge.service -f
 
 The generated service uses `NoNewPrivileges`, a private `/tmp`, a read-only system view, and only grants write access to the WVAB checkout.
 
-## 6. Other camera sources
+## 6. Containerized headless server
 
-For a local USB/webcam sender, export a unique `WVAB_UDP_KEY_HEX` and `WVAB_UDP_TOKEN`, then run:
+Generate the local credential file before running Compose. `.dockerignore` prevents the local Pi environment file and ESP32 header from entering the image build context; Compose injects the server environment at runtime instead.
+
+```bash
+python tools/generate_device_secrets.py --server-ip 192.168.4.2
+docker compose build
+docker compose up -d udp-vision-server
+```
+
+The image runs as an unprivileged `wvab` user. The default service exposes only UDP port 9999 and disables TTS and WebSocket control inside the container.
+
+The optional navigation profile requires Linux camera-device access:
+
+```bash
+export WVAB_VIDEO_GID="$(getent group video | cut -d: -f3)"
+export WVAB_CAMERA_DEVICE=/dev/video0
+docker compose --profile navigation up -d navigation-engine prometheus
+```
+
+The profile forces headless mode. Metrics are published by the navigation process on port 8000 and scraped by Prometheus. Host access to ports 8000 and 9090 is bound to loopback only.
+
+## 7. Other camera sources
+
+For a local USB/webcam Python sender, export a unique `WVAB_UDP_KEY_HEX` and `WVAB_UDP_TOKEN`, then run:
 
 ```bash
 python udp_streaming.py server --config wvab_config.sample.json
@@ -94,7 +110,7 @@ python udp_streaming.py client --config wvab_config.sample.json --server-ip 127.
 
 For a smartphone/IP camera, pass the trusted local stream URL as `--camera`. Do not expose camera feeds or the UDP/control ports directly to the public Internet.
 
-## 7. Depth and navigation research path
+## 8. Depth and navigation research path
 
 MiDaS is optional and scale-ambiguous. Provision it once while online:
 
@@ -102,9 +118,9 @@ MiDaS is optional and scale-ambiguous. Provision it once while online:
 python tools/download_models.py midas
 ```
 
-Metric occupancy updates remain disabled unless an external camera/depth calibration is explicitly configured. `navigation_pipeline.py` publishes `STOP`, `DEGRADED`, or `GUIDANCE_AVAILABLE` state instead of claiming a route is safe.
+Metric occupancy updates remain disabled unless external camera/depth calibration is explicitly configured. `navigation_pipeline.py` publishes `STOP`, `DEGRADED`, or `GUIDANCE_AVAILABLE` state instead of claiming a route is safe.
 
-## 8. Validation before any supervised trial
+## 9. Validation before any supervised trial
 
 At minimum capture evidence for:
 

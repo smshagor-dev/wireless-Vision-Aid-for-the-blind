@@ -3,7 +3,6 @@
 
 # Computer Vision and Machine Learning
 opencv-python>=4.8,<5
-opencv-contrib-python>=4.8,<5
 ultralytics>=8.2,<9
 torch>=2.2,<3
 torchvision>=0.17,<1

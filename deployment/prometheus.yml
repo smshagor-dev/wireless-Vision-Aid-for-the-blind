@@ -1,15 +1,9 @@
-# --------------------------------------------------------------------------------------------- # 
-# | Name: Md. Shahanur Islam Shagor                                                           | # 
-# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
-# | Voronezh State University of Forestry and Technologies                                    | # 
-# | Build for Blind people within 15$                                                         | # 
-# --------------------------------------------------------------------------------------------- # 
-
-
 global:
   scrape_interval: 5s
+  evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: "navigation"
+  - job_name: "wvab-navigation"
+    metrics_path: /metrics
     static_configs:
       - targets: ["navigation-engine:8000"]

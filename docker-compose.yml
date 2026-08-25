@@ -1,48 +1,73 @@
-# --------------------------------------------------------------------------------------------- # 
-# | Name: Md. Shahanur Islam Shagor                                                           | # 
-# | Autonomous Systems & UAV Researcher | Cybersecurity    | Specialist | Software Engineer   | #
-# | Voronezh State University of Forestry and Technologies                                    | # 
-# | Build for Blind people within 15$                                                         | # 
-# --------------------------------------------------------------------------------------------- # 
-
-version: "3.8"
-
 services:
-  vision-server:
-    build: .
-    command: ["python", "vision_server.py"]
-    restart: always
-    volumes:
-      - ./config:/app/config
-      - ./logs:/app/logs
+  udp-vision-server:
+    build:
+      context: .
+    init: true
+    command: ["python", "udp_streaming.py", "server", "--config", "wvab_config.sample.json"]
+    env_file:
+      - ./deployment/rpi/wvab_edge.env
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
+      WVAB_UDP_TTS: "0"
+      WVAB_UDP_HEADLESS: "1"
+      WVAB_UDP_WATCHDOG_SERVER_IDLE_S: "0"
+      WVAB_UDP_LOG_PATH: /tmp/wvab_udp_server.log
+      WVAB_UDP_HEALTH_PATH: /tmp/wvab_udp_server_health.json
+      WVAB_WS_CONTROL: "0"
+      YOLO_CONFIG_DIR: /tmp/Ultralytics
+    ports:
+      - "9999:9999/udp"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=96m,mode=1777
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json,time; p=json.load(open('/tmp/wvab_udp_server_health.json')); assert time.time()-float(p['ts']) < 20"
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
 
   navigation-engine:
-    build: .
+    profiles: ["navigation"]
+    build:
+      context: .
+    init: true
     command: ["python", "navigation_pipeline.py"]
-    restart: always
-    volumes:
-      - ./config:/app/config
-      - ./logs:/app/logs
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
+      WVAB_NAV_HEADLESS: "1"
+      WVAB_METRICS_ENABLED: "1"
+      WVAB_METRICS_PORT: "8000"
+      WVAB_OFFLINE: "1"
+      YOLO_CONFIG_DIR: /tmp/Ultralytics
+    devices:
+      - "${WVAB_CAMERA_DEVICE:-/dev/video0}:/dev/video0"
+    group_add:
+      - "${WVAB_VIDEO_GID:-44}"
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000/tcp"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
 
-  camera-stream:
-    build: .
-    command: ["python", "udp_streaming.py", "client", "--config", "wvab_config.sample.json"]
-    restart: always
+  prometheus:
+    profiles: ["navigation"]
+    image: prom/prometheus:v3.13.2-distroless
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
     volumes:
-      - ./logs:/app/logs
-
-  monitoring:
-    image: prom/prometheus
-    restart: always
-    volumes:
-      - ./deployment/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./deployment/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090/tcp"
+    depends_on:
+      - navigation-engine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true

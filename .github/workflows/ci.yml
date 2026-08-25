@@ -68,6 +68,9 @@ jobs:
             echo "$secrets"
             exit 1
           fi
+          grep -Fx 'esp32_secrets.h' .dockerignore >/dev/null
+          grep -Fx 'deployment/rpi/wvab_edge.env' .dockerignore >/dev/null
+          grep -Eq '^USER[[:space:]]+wvab$' Dockerfile
           if git grep -n -E 'WVAB_UDP_AUTH[=:][[:space:]]*0|0102030405060708090A0B0C0D0E0F10' -- ':!*.example.*'; then
             echo "Insecure deployment default found in tracked source/docs."
             exit 1

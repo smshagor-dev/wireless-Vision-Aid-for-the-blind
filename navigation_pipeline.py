@@ -1,8 +1,14 @@
 import json
 import os
+import signal
+import threading
 import time
 
 import cv2
+
+from offline_utils import configure_offline_env, ensure_local_model
+
+OFFLINE_MODE = configure_offline_env()
 from ultralytics import YOLO
 
 from core.config import load_config, validate_navigation_config
@@ -15,6 +21,13 @@ from metrics import Metrics
 from navigation.planner import PathPlanner
 from perception.depth_estimator import DepthEstimator
 from perception.perception_mapping import update_grid_from_frame
+
+
+def _env_bool(name, default=False):
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _extract_detections(results, conf_thres=0.5):
@@ -73,6 +86,23 @@ def main():
         cfg["system"]["log_level"],
     )
     safety = SafetyStatePublisher(cfg["navigation"]["safety_state_file"])
+    safety.stop("initializing")
+
+    stop_event = threading.Event()
+
+    def handle_signal(signum, _frame):
+        logger.info("Signal %s received; stopping navigation pipeline", signum)
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, handle_signal)
+    try:
+        signal.signal(signal.SIGTERM, handle_signal)
+    except (AttributeError, ValueError):
+        pass
+
+    headless = _env_bool("WVAB_NAV_HEADLESS", cfg["system"].get("headless", False))
+    metrics_enabled = _env_bool("WVAB_METRICS_ENABLED", cfg["system"].get("metrics_enabled", True))
+    metrics_port = int(os.environ.get("WVAB_METRICS_PORT", cfg["system"].get("metrics_port", 8000)))
 
     cam_cfg = cfg["camera"]
     cap = cv2.VideoCapture(cam_cfg["source"])
@@ -83,14 +113,13 @@ def main():
         safety.stop("camera_open_failed")
         raise RuntimeError("Camera could not be opened")
 
-    model = YOLO(cfg["perception"]["yolo_model"])
+    model_path = ensure_local_model(cfg["perception"]["yolo_model"], offline=OFFLINE_MODE)
+    model = YOLO(model_path)
     depth_cfg = cfg["perception"]["depth"]
     depth = DepthEstimator(model_name=depth_cfg["backend"], device="auto", logger=logger)
 
     intr = cam_cfg["intrinsics"]
-    metric_depth_ready = bool(depth_cfg.get("metric_calibrated", False)) and bool(
-        intr.get("calibrated", False)
-    )
+    metric_depth_ready = bool(depth_cfg.get("metric_calibrated", False)) and bool(intr.get("calibrated", False))
     if not metric_depth_ready:
         logger.warning(
             "Metric depth mapping disabled: camera/depth scale is not calibrated. "
@@ -125,8 +154,15 @@ def main():
         allow_diagonal=cfg["planning"]["allow_diagonal"],
         smooth=cfg["planning"]["smooth_path"],
     )
-    metrics = Metrics(port=8000)
-    metrics.start()
+    metrics = None
+    if metrics_enabled:
+        try:
+            metrics = Metrics(port=metrics_port)
+            metrics.start()
+            logger.info("Prometheus metrics listening on port %s", metrics_port)
+        except Exception as exc:
+            metrics = None
+            logger.warning("Metrics server unavailable; continuing without Prometheus: %s", exc)
 
     frames = 0
     last_fps_ts = time.time()
@@ -135,13 +171,13 @@ def main():
     last_frame_ok = time.time()
 
     try:
-        while True:
+        while not stop_event.is_set():
             ok, frame = cap.read()
             if not ok:
                 if time.time() - last_frame_ok > 1.0:
                     safety.stop("camera_frame_missing")
                 logger.warning("Camera frame missing")
-                time.sleep(0.1)
+                stop_event.wait(0.1)
                 continue
             last_frame_ok = time.time()
 
@@ -179,22 +215,20 @@ def main():
                     grid.update_from_points(points, sensor_origin=(pose[0], pose[1]))
                     map_is_metric = True
 
-            metrics.observe_inference(time.time() - t0)
+            if metrics is not None:
+                metrics.observe_inference(time.time() - t0)
 
             if time.time() - last_goal_check > 0.5:
                 last_goal = _get_goal(cfg, last_goal)
                 last_goal_check = time.time()
-            goal_world = _goal_world(
-                pose,
-                last_goal,
-                cfg["navigation"]["fallback_goal_relative"],
-            )
+            goal_world = _goal_world(pose, last_goal, cfg["navigation"]["fallback_goal_relative"])
             start = grid.world_to_grid(pose[0], pose[1])
             goal = grid.world_to_grid(goal_world[0], goal_world[1])
 
             p0 = time.time()
             path = planner.plan(grid, start, goal)
-            metrics.observe_planner(time.time() - p0)
+            if metrics is not None:
+                metrics.observe_planner(time.time() - p0)
             if not path:
                 safety.stop("path_not_found", pose=[pose[0], pose[1]])
             elif map_is_metric:
@@ -208,20 +242,23 @@ def main():
 
             frames += 1
             if time.time() - last_fps_ts >= 1.0:
-                metrics.set_camera_fps(frames / (time.time() - last_fps_ts))
-                metrics.update_uptime()
+                if metrics is not None:
+                    metrics.set_camera_fps(frames / (time.time() - last_fps_ts))
+                    metrics.update_uptime()
                 frames = 0
                 last_fps_ts = time.time()
 
-            cv2.imshow("Navigation Pipeline", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+            if not headless:
+                cv2.imshow("Navigation Pipeline", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    stop_event.set()
     finally:
         safety.stop("pipeline_stopped")
         if orbslam is not None:
             orbslam.stop()
         cap.release()
-        cv2.destroyAllWindows()
+        if not headless:
+            cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
