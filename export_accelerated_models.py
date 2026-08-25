@@ -4,12 +4,11 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 from pathlib import Path
 
 from offline_utils import configure_offline_env, ensure_local_model
-from training.runtime_validation import require_positive, validate_export_format
+from training.runtime_validation import require_export_backend, require_positive
 
 
 def _configure_runtime(allow_online: bool) -> bool:
@@ -26,29 +25,27 @@ def _load_yolo():
     return YOLO
 
 
-def _require_export_backend(export_format: str) -> None:
-    if export_format == "openvino" and importlib.util.find_spec("openvino") is None:
-        raise RuntimeError(
-            "OpenVINO export requested but openvino is not installed. "
-            "Install requirements-accelerators.txt first."
-        )
-    if export_format == "engine":
-        if importlib.util.find_spec("tensorrt") is None:
-            raise RuntimeError("TensorRT export requested but tensorrt is not installed")
-        try:
-            import torch
-        except Exception as exc:
-            raise RuntimeError("PyTorch is required for TensorRT export") from exc
-        if not torch.cuda.is_available():
-            raise RuntimeError("TensorRT export requires a CUDA-capable runtime")
-
-
-def export_model(model_path: str, export_format: str, *, imgsz: int, half: bool, device: str):
-    normalized = validate_export_format(export_format)
-    _require_export_backend(normalized)
+def export_model(
+    model_path: str,
+    export_format: str,
+    *,
+    imgsz: int,
+    half: bool,
+    device: str,
+    simplify: bool,
+):
+    normalized = require_export_backend(export_format, simplify=simplify)
     YOLO = _load_yolo()
     model = YOLO(model_path)
-    return model.export(format=normalized, imgsz=imgsz, half=half, device=device)
+    export_kwargs = {
+        "format": normalized,
+        "imgsz": imgsz,
+        "half": half,
+        "device": device,
+    }
+    if normalized in {"onnx", "engine"}:
+        export_kwargs["simplify"] = simplify
+    return model.export(**export_kwargs)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -63,6 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--half", action="store_true")
+    parser.add_argument("--simplify", action="store_true", help="Use onnxslim for ONNX/TensorRT export")
     parser.add_argument("--device", default="cpu")
     parser.add_argument(
         "--allow-online",
@@ -88,6 +86,7 @@ def main() -> None:
                 imgsz=args.imgsz,
                 half=args.half,
                 device=args.device,
+                simplify=args.simplify,
             )
             outputs.append((export_format, output))
         print(f"Source model: {Path(model_path).resolve() if Path(model_path).exists() else model_path}")
