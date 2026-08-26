@@ -1,4 +1,5 @@
 name: Publish latest WVAB v1.0.0 APK
+# rerun after About Material surface fix
 
 on:
   push:
