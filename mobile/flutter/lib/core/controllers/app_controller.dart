@@ -268,7 +268,10 @@ class AppController extends ChangeNotifier {
   Future<void> clearHistory() async {
     _history = <DetectionHistoryEntry>[];
     _lastHistoryCapture.clear();
-    await historyStore.clear();
+    _historyWrite = _historyWrite.then((_) => historyStore.clear()).catchError((Object error, StackTrace stackTrace) {
+      debugPrint('WVAB detection history clear failed: $error\n$stackTrace');
+    });
+    await _historyWrite;
     notifyListeners();
   }
 
