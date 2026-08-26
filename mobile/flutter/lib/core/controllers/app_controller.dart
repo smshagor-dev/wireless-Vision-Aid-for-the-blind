@@ -37,6 +37,7 @@ class AppController extends ChangeNotifier {
   String? _runtimeError;
   List<Detection> _lastDetections = const [];
   Duration? _lastInferenceDuration;
+  Future<void>? _inferenceInitialization;
 
   AppSettings get settings => _settings;
   AppStrings get strings => AppStrings(_settings.languageCode);
@@ -49,9 +50,25 @@ class AppController extends ChangeNotifier {
   Duration? get lastInferenceDuration => _lastInferenceDuration;
 
   Future<void> initialize() async {
-    _settings = await settingsStore.load();
-    _esp32Credentials = await credentialsStore.read();
-    await speechService.initialize(_settings.languageCode);
+    try {
+      _settings = await settingsStore.load();
+    } catch (error, stackTrace) {
+      debugPrint('WVAB settings initialization failed; using safe defaults: $error\n$stackTrace');
+      _settings = const AppSettings();
+    }
+
+    try {
+      _esp32Credentials = await credentialsStore.read();
+    } catch (error, stackTrace) {
+      debugPrint('WVAB secure credential initialization failed: $error\n$stackTrace');
+      _esp32Credentials = null;
+    }
+
+    try {
+      await speechService.initialize(_settings.languageCode);
+    } catch (error, stackTrace) {
+      debugPrint('WVAB TTS initialization failed; continuing without startup failure: $error\n$stackTrace');
+    }
     notifyListeners();
   }
 
@@ -64,7 +81,11 @@ class AppController extends ChangeNotifier {
     }
     _settings = settings;
     await settingsStore.save(settings);
-    await speechService.setLanguage(settings.languageCode);
+    try {
+      await speechService.setLanguage(settings.languageCode);
+    } catch (error, stackTrace) {
+      debugPrint('WVAB TTS language update failed: $error\n$stackTrace');
+    }
     notifyListeners();
   }
 
@@ -103,18 +124,33 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> ensureInferenceReady() async {
-    if (_runtimeState == LocalRuntimeState.ready) return;
-    if (_runtimeState == LocalRuntimeState.initializing) return;
+  Future<void> ensureInferenceReady() {
+    if (_runtimeState == LocalRuntimeState.ready && inferenceEngine.isReady) {
+      return Future.value();
+    }
+    final existing = _inferenceInitialization;
+    if (existing != null) return existing;
+
+    final initialization = _initializeInference();
+    _inferenceInitialization = initialization;
+    return initialization.whenComplete(() {
+      if (identical(_inferenceInitialization, initialization)) {
+        _inferenceInitialization = null;
+      }
+    });
+  }
+
+  Future<void> _initializeInference() async {
     _runtimeState = LocalRuntimeState.initializing;
     _runtimeError = null;
     notifyListeners();
     try {
       await inferenceEngine.initialize();
       _runtimeState = LocalRuntimeState.ready;
-    } catch (error) {
+    } catch (error, stackTrace) {
       _runtimeState = LocalRuntimeState.error;
       _runtimeError = error.toString();
+      debugPrint('WVAB inference initialization failed: $error\n$stackTrace');
       rethrow;
     } finally {
       notifyListeners();
@@ -125,7 +161,7 @@ class AppController extends ChangeNotifier {
     Float32List input, {
     LetterboxTransform? transform,
   }) async {
-    if (_runtimeState != LocalRuntimeState.ready) {
+    if (_runtimeState != LocalRuntimeState.ready || !inferenceEngine.isReady) {
       await ensureInferenceReady();
     }
     final result = await inferenceEngine.run(
@@ -165,20 +201,32 @@ class AppController extends ChangeNotifier {
 
   Future<void> announce(String message, {bool urgent = false}) async {
     if (_settings.vibrationEnabled) {
-      if (urgent) {
-        await feedbackService.urgent();
-      } else {
-        await feedbackService.medium();
+      try {
+        if (urgent) {
+          await feedbackService.urgent();
+        } else {
+          await feedbackService.medium();
+        }
+      } catch (error, stackTrace) {
+        debugPrint('WVAB haptic feedback failed: $error\n$stackTrace');
       }
     }
     if (_settings.speechEnabled) {
-      await speechService.speak(message);
+      try {
+        await speechService.speak(message);
+      } catch (error, stackTrace) {
+        debugPrint('WVAB speech feedback failed: $error\n$stackTrace');
+      }
     }
   }
 
   Future<void> stopFeedback() async {
     guidanceEngine.reset();
-    await speechService.stop();
+    try {
+      await speechService.stop();
+    } catch (error, stackTrace) {
+      debugPrint('WVAB speech stop failed: $error\n$stackTrace');
+    }
   }
 
   @override
