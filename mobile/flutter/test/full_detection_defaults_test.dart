@@ -9,6 +9,7 @@ void main() {
     expect(coco80Labels, hasLength(80));
     expect(settings.detectedClasses, hasLength(80));
     expect(settings.detectedClasses, equals(coco80Labels.toSet()));
+    expect(settings.detectionConfidence, 0.25);
   });
 
   test('legacy mobile class set is a strict subset of the full detector', () {

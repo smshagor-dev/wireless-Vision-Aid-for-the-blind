@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / 'android/app/src/main/AndroidManifest.xml'
 GRADLE = ROOT / 'android/app/build.gradle.kts'
+PROGUARD = ROOT / 'android/app/proguard-rules.pro'
 
 
 def configure_manifest() -> None:
@@ -40,6 +41,19 @@ def configure_manifest() -> None:
     MANIFEST.write_text(text, encoding='utf-8')
 
 
+def configure_proguard() -> None:
+    PROGUARD.write_text(
+        '# WVAB Android native-runtime stability rules.\n'
+        '# flutter_onnxruntime requires ONNX Runtime Java/JNI symbols to survive release packaging.\n'
+        '-keep class ai.onnxruntime.** { *; }\n'
+        '-dontwarn ai.onnxruntime.**\n'
+        '-keepclasseswithmembernames class * {\n'
+        '    native <methods>;\n'
+        '}\n',
+        encoding='utf-8',
+    )
+
+
 def configure_gradle() -> None:
     text = GRADLE.read_text(encoding='utf-8')
     if 'minSdk = 24' not in text:
@@ -47,6 +61,22 @@ def configure_gradle() -> None:
         if source not in text:
             raise SystemExit('Unexpected Android Gradle minSdk template')
         text = text.replace(source, 'minSdk = 24', 1)
+
+    if 'isMinifyEnabled = false' not in text:
+        signing = 'signingConfig = signingConfigs.getByName("debug")'
+        if signing not in text:
+            raise SystemExit('Unexpected Android Gradle release template')
+        release_stability = (
+            signing
+            + '\n            // Keep release packaging deterministic for native camera/ORT plugins.\n'
+            + '            isMinifyEnabled = false\n'
+            + '            isShrinkResources = false\n'
+            + '            proguardFiles(\n'
+            + '                getDefaultProguardFile("proguard-android-optimize.txt"),\n'
+            + '                "proguard-rules.pro",\n'
+            + '            )'
+        )
+        text = text.replace(signing, release_stability, 1)
     GRADLE.write_text(text, encoding='utf-8')
 
 
@@ -54,6 +84,7 @@ def main() -> None:
     if not MANIFEST.is_file() or not GRADLE.is_file():
         raise SystemExit('Run flutter create for Android before configuring the host project')
     configure_manifest()
+    configure_proguard()
     configure_gradle()
 
 

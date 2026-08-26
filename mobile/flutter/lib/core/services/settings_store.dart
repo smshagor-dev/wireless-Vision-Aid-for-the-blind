@@ -12,7 +12,7 @@ class SharedPreferencesSettingsStore implements SettingsStore {
       : _preferences = preferences ?? SharedPreferencesAsync();
 
   static const _prefix = 'wvab.';
-  static const _detectionSchemaVersion = 2;
+  static const _detectionSchemaVersion = 3;
   final SharedPreferencesAsync _preferences;
 
   @override
@@ -22,11 +22,18 @@ class SharedPreferencesSettingsStore implements SettingsStore {
     final classes = await _preferences.getStringList('${_prefix}detected_classes');
     final detectionSchema = await _preferences.getInt('${_prefix}detection_schema_version') ?? 1;
 
-    final detectedClasses = detectionSchema < _detectionSchemaVersion
+    final detectedClasses = detectionSchema < 2
         ? allCocoDetectedClasses
         : (classes == null
             ? allCocoDetectedClasses
             : classes.where(allCocoDetectedClasses.contains).toSet());
+    final storedConfidence = await _preferences.getDouble('${_prefix}detection_confidence');
+    // Schema 3 retunes the stock mobile detector from 0.50 to 0.25. Existing
+    // installs using an older schema receive the safer default once, while
+    // explicit user tuning made on schema 3+ is preserved.
+    final detectionConfidence = detectionSchema < _detectionSchemaVersion
+        ? 0.25
+        : (storedConfidence ?? 0.25);
 
     return AppSettings(
       firstRunCompleted: await _preferences.getBool('${_prefix}first_run_completed') ?? false,
@@ -36,7 +43,7 @@ class SharedPreferencesSettingsStore implements SettingsStore {
       vibrationEnabled: await _preferences.getBool('${_prefix}vibration_enabled') ?? true,
       esp32ListenPort: await _preferences.getInt('${_prefix}esp32_listen_port') ?? 9999,
       autoReconnect: await _preferences.getBool('${_prefix}auto_reconnect') ?? true,
-      detectionConfidence: await _preferences.getDouble('${_prefix}detection_confidence') ?? 0.50,
+      detectionConfidence: detectionConfidence,
       detectedClasses: detectedClasses,
     );
   }
