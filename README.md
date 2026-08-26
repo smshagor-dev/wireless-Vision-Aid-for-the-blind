@@ -5,9 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Mobile: v1.0.0](https://img.shields.io/badge/Android-v1.0.0-blue.svg)](mobile/flutter/)
 
-**Wireless Vision-Aid for the Blind (WVAB)** is an offline-first assistive computer-vision platform for blind and low-vision users. The project combines real-time object detection, focused spoken guidance, local detection history, secure ESP32-CAM streaming, Raspberry Pi deployment, optional depth/localization research modules, and a standalone Flutter Android application.
+**Wireless Vision-Aid for the Blind (WVAB)** is an offline-first assistive computer-vision platform for blind and low-vision users. It combines real-time object detection, focused spoken guidance, local detection history, secure ESP32-CAM streaming, Raspberry Pi deployment, optional depth/localization research modules, and a standalone Flutter Android application.
 
-WVAB is built as an engineering and research platform rather than a demo that hides important limitations. The system separates what can be measured reliably from what is only estimated, keeps critical transport paths authenticated and encrypted, and fails closed when navigation inputs are missing or uncalibrated.
+WVAB is designed as an engineering and research platform. It intentionally separates reliable measurements from heuristic estimates, keeps wearable transport authenticated and encrypted by default, and exposes explicit degraded or stop states when navigation inputs are missing, stale, or uncalibrated.
 
 > **Safety status**
 >
@@ -18,9 +18,9 @@ WVAB is built as an engineering and research platform rather than a demo that hi
 ## Contents
 
 - [1. Project goals](#1-project-goals)
-- [2. What is included](#2-what-is-included)
+- [2. Current capabilities](#2-current-capabilities)
 - [3. System architecture](#3-system-architecture)
-- [4. Android application](#4-android-application)
+- [4. Flutter Android application](#4-flutter-android-application)
 - [5. Perception and guidance mathematics](#5-perception-and-guidance-mathematics)
 - [6. Navigation and fail-safe semantics](#6-navigation-and-fail-safe-semantics)
 - [7. Secure UDP design](#7-secure-udp-design)
@@ -37,67 +37,69 @@ WVAB is built as an engineering and research platform rather than a demo that hi
 - [18. Production-readiness boundary](#18-production-readiness-boundary)
 - [19. Privacy](#19-privacy)
 - [20. Licensing](#20-licensing)
-- [21. Academic use and citation](#21-academic-use-and-citation)
+- [21. Academic use and reproducibility](#21-academic-use-and-reproducibility)
 - [22. Maintainer and contact](#22-maintainer-and-contact)
 
 ---
 
 ## 1. Project goals
 
-The practical problem behind WVAB is simple to describe but difficult to solve well: a vision system can detect many objects in every frame, but reading every label aloud is not useful to a person who needs a short, timely instruction.
+The central problem WVAB addresses is not simply object recognition. A detector may return many valid objects in every frame, but reading every label aloud creates an audio queue that becomes stale before a user can act on it.
 
 WVAB therefore focuses on six engineering goals:
 
-1. **Local perception** — run the primary object detector locally without requiring a cloud inference server.
-2. **Low cognitive load** — focus speech on one relevant obstacle instead of reading the whole scene continuously.
-3. **Useful spatial context** — report object direction and conservative distance information where possible.
-4. **Fail-safe navigation research** — distinguish between qualitative guidance and genuinely calibrated metric navigation.
+1. **Local perception** — run the primary detector locally without requiring a cloud inference server.
+2. **Low cognitive load** — speak one relevant obstacle at a time instead of continuously reading the entire scene.
+3. **Useful spatial context** — report direction and conservative distance information where technically justified.
+4. **Fail-safe navigation research** — distinguish qualitative visual guidance from genuinely calibrated metric navigation.
 5. **Secure wearable transport** — authenticate and encrypt ESP32/Python camera streams and reject replayed state.
 6. **Reproducible deployment** — provide CI, model checks, Android release builds, Raspberry Pi tooling, Docker support, and explicit readiness gates.
 
-The current project is suitable for software development, controlled research, bench testing, dataset/model experimentation, Android assistive-interface development, and secure edge-camera integration.
+The repository is suitable for software development, controlled research, bench validation, Android assistive-interface work, secure edge-camera integration, model experimentation, and navigation research.
 
 ---
 
-## 2. What is included
+## 2. Current capabilities
 
 ### Perception
 
 - YOLOv8 real-time object detection.
-- Mobile ONNX inference with a bundled `320 × 320` YOLOv8n model.
-- 80 COCO classes enabled in the Flutter application.
-- Configurable confidence threshold; mobile default is `0.25`.
+- Bundled mobile ONNX model with `320 × 320` input.
+- 80 COCO classes available in the Flutter application.
+- Configurable detection confidence; mobile default is `0.25`.
 - Qualitative proximity classification.
-- Conservative approximate metric estimates for selected reference-size classes.
+- Conservative approximate metric distance for selected reference-size classes.
 - Left / center / right spatial classification.
-- Focused obstacle selection to reduce speech overload.
-- Local detection history with timestamps, confidence, direction, proximity, and camera source.
+- Focused obstacle selection to reduce audio overload.
+- Local detection history containing timestamp, class, confidence, proximity, direction, and camera source.
 
 ### User feedback
 
 - Android text-to-speech.
 - Haptic feedback.
 - Focus hold and announcement cooldown.
-- Urgent `STOP` behavior for visually blocked scenes.
-- Language selection with OS-dependent TTS availability.
-- Local profile/name onboarding and spoken welcome.
+- Urgent stop behavior for visually blocked scenes.
+- Language selection with OS-dependent TTS voice availability.
+- Local profile/name onboarding.
+- Spoken startup greeting: `Welcome Mr. {name}` when speech is enabled and a saved profile name exists.
 
 ### Camera and edge paths
 
 - Android phone camera.
 - ESP32-CAM.
-- Trusted smartphone/IP camera URL.
-- Python UDP camera sender.
-- Raspberry Pi edge service.
+- Trusted smartphone/IP-camera URL.
+- Python UDP sender.
+- Raspberry Pi edge runtime.
 
 ### Security
 
 - AES-GCM encrypted UDP transport.
 - Authentication required by default.
 - Protocol-v2 authentication counters.
-- Session IDs and frame replay protection.
-- Persistent replay state across normal restarts.
-- Authenticated packet header as AES-GCM AAD.
+- Non-zero sender session IDs.
+- Frame replay/order protection.
+- Persistent authentication replay state across normal restarts.
+- Full UDP packet header authenticated as AES-GCM AAD.
 - Bounded authentication/session/frame state.
 - Loopback WebSocket control by default.
 
@@ -126,7 +128,9 @@ The current project is suitable for software development, controlled research, b
 
 ## 3. System architecture
 
-The repository supports several runtime paths, but they share the same design principle: **capture → validate → infer → interpret → provide bounded feedback**.
+All supported runtime paths follow the same high-level sequence:
+
+**capture → validate → infer → interpret → provide bounded feedback**
 
 ```text
                          +----------------------+
@@ -165,9 +169,9 @@ The repository supports several runtime paths, but they share the same design pr
 | `vision_server.py` | Local USB/trusted camera detection and qualitative proximity |
 | `udp_streaming.py` | Authenticated/encrypted remote camera streaming |
 | `core/udp_runtime.py` | Shared UDP transport/session implementation |
-| `core/udp_auth_state.py` | Persistent protocol-v2 auth/replay state |
+| `core/udp_auth_state.py` | Persistent protocol-v2 authentication/replay state |
 | `navigation_pipeline.py` | Experimental mapping/planning and fail-safe navigation state |
-| `smartphone_camera.py` | Explicit trusted smartphone/IP camera launcher |
+| `smartphone_camera.py` | Explicit trusted smartphone/IP-camera launcher |
 | `main.py` | Source-checkout command dispatcher |
 | `mobile/flutter/` | Standalone Android assistive application |
 
@@ -175,9 +179,9 @@ Legacy duplicate/mock GUI runtimes were removed because they either duplicated a
 
 ---
 
-## 4. Android application
+## 4. Flutter Android application
 
-The standalone Android application lives in `mobile/flutter/`.
+The standalone Android application is located in `mobile/flutter/`.
 
 ### Current mobile contract
 
@@ -196,231 +200,287 @@ The standalone Android application lives in `mobile/flutter/`.
 | Android ONNX Runtime | forced to `1.22.0` |
 | Camera backend | `camera_android 0.10.11` |
 
-### Mobile features
+### App features
 
-The app includes:
+The mobile application includes:
 
-- first-run name setup;
+- first-run user-name setup;
 - language selection;
 - phone-camera and ESP32-CAM source selection;
 - local ONNX object detection;
-- focused one-object-at-a-time speech guidance;
+- focused one-object-at-a-time spoken guidance;
 - approximate distance/range guidance;
 - visual left/center/right route comparison;
-- vibration feedback;
+- haptic feedback;
 - local detection history;
 - history clearing;
-- configurable detection classes and confidence;
-- local profile/settings persistence;
+- configurable classes and confidence;
+- local settings/profile persistence;
 - Privacy Policy screen;
 - Open Source Licenses screen using Flutter's installed license registry;
 - How It Works screen;
 - Contact screen;
-- spoken startup greeting: `Welcome Mr. {name}` when speech is enabled and a profile name is stored.
+- local-first operation for phone-camera inference.
 
-### Why the app speaks one object at a time
+### Focused guidance behavior
 
-A detector may return several valid objects per frame. Speaking all of them creates an audio queue that can become obsolete before it finishes. WVAB therefore uses a **focused guidance policy**:
+The detector may return several objects in one frame. The speech layer intentionally selects one primary object instead of serializing the full detection list.
 
-1. choose one primary risk;
-2. keep that focus briefly to avoid rapid switching;
-3. allow a genuinely nearer hazard to preempt the old focus;
-4. generate one concise route cue;
-5. keep every accepted detection available to the UI/history even though only one is spoken.
+The policy is:
 
-A typical English message is intentionally short:
+1. rank currently accepted detections by risk;
+2. choose one primary detection;
+3. hold that focus briefly to avoid rapid switching;
+4. allow a genuinely nearer hazard to preempt the old focus;
+5. generate one route cue;
+6. keep all detections in UI/history even when only one is spoken.
+
+Example:
 
 ```text
 Chair, about 1.5 meters away, left. Right side appears clearer. Keep right carefully.
 ```
 
-The phrase **appears clearer** is deliberate. The camera sees image occupancy; it does not prove floor traversability.
+The words **appears clearer** are deliberate. The camera sees image occupancy; it does not prove that the floor or ground is traversable.
 
 ---
 
 ## 5. Perception and guidance mathematics
 
-This section documents the mathematical meaning of the values produced by the project. The equations are intentionally separated into **relative visual geometry**, **approximate monocular distance**, and **calibrated metric distance** because they have different validity.
+This section uses **plain GitHub-safe mathematical notation** rather than renderer-dependent LaTeX. The formulas are the same ones implemented or referenced by the project, but they will render consistently in GitHub, terminals, exported Markdown, and plain-text documentation.
 
 ### 5.1 Normalized bounding-box geometry
 
-For a detection with normalized coordinates
+For a normalized detection box:
 
-$$
-B = (x_1, y_1, x_2, y_2), \qquad x,y \in [0,1]
-$$
+```text
+B = (x1, y1, x2, y2), where x and y are in [0, 1]
+```
 
-the mobile runtime defines
+Width, height, and area are:
 
-$$
-w_B = \max(0, x_2-x_1)
-$$
+```text
+w_B = max(0, x2 - x1)
+h_B = max(0, y2 - y1)
+A_B = w_B × h_B
+```
 
-$$
-h_B = \max(0, y_2-y_1)
-$$
+Horizontal center is:
 
-$$
-A_B = w_B h_B
-$$
+```text
+c_x = clamp((x1 + x2) / 2, 0, 1)
+```
 
-and the normalized horizontal center
+These values remain normalized after model-space boxes are mapped back into source-frame coordinates.
 
-$$
-c_x = \operatorname{clip}\left(\frac{x_1+x_2}{2},0,1\right).
-$$
+### 5.2 Relative visual proximity
 
-These values are independent of the display resolution after box coordinates have been remapped from the model letterbox back into source-frame coordinates.
+The mobile guidance engine uses normalized box height as a visual proximity heuristic:
 
-### 5.2 Relative proximity
+```text
+if h_B > 0.60:
+    proximity = immediate
+elif 0.40 < h_B <= 0.60:
+    proximity = close
+elif 0.20 < h_B <= 0.40:
+    proximity = medium
+else:
+    proximity = far
+```
 
-The Flutter guidance engine uses bounding-box height as a **visual proximity heuristic**:
+Equivalent piecewise definition:
 
-$$
-P(h_B)=
-\begin{cases}
-\text{immediate}, & h_B > 0.60\\
-\text{close}, & 0.40 < h_B \le 0.60\\
-\text{medium}, & 0.20 < h_B \le 0.40\\
-\text{far}, & h_B \le 0.20
-\end{cases}
-$$
+```text
+P(h_B) = immediate, when h_B > 0.60
+P(h_B) = close,     when 0.40 < h_B <= 0.60
+P(h_B) = medium,    when 0.20 < h_B <= 0.40
+P(h_B) = far,       when h_B <= 0.20
+```
 
-This is not a metric depth measurement. A tall physical object and a short physical object can produce similar image heights at different real distances.
+This is **not metric depth**. Two objects with different physical sizes can generate the same normalized image height at different real distances.
 
 ### 5.3 Horizontal direction
 
-The horizontal direction is derived from the normalized box center:
+Direction is determined from the normalized horizontal box center:
 
-$$
-D(c_x)=
-\begin{cases}
-\text{left}, & c_x < 0.38\\
-\text{center}, & 0.38 \le c_x \le 0.62\\
-\text{right}, & c_x > 0.62
-\end{cases}
-$$
+```text
+D(c_x) = left,   when c_x < 0.38
+D(c_x) = center, when 0.38 <= c_x <= 0.62
+D(c_x) = right,  when c_x > 0.62
+```
 
-The thresholds intentionally leave a central corridor rather than treating exactly half the image as the only forward region.
+The central range intentionally represents a walking corridor rather than a single image-center line.
 
-### 5.4 Approximate monocular metric distance
+### 5.4 Approximate monocular distance used by the mobile app
 
-For selected classes with a reasonably stable real-world vertical reference size, the mobile application computes a coarse estimate using a normalized pinhole approximation:
+For selected classes that have a reasonably stable real-world vertical size, WVAB uses a normalized pinhole approximation:
 
-$$
-\hat d = \frac{H_r f_n}{h_B}
-$$
+```text
+d_hat = (H_r × f_n) / h_B
+```
 
 where:
 
-- $\hat d$ is approximate distance in meters;
-- $H_r$ is the class reference height in meters;
-- $f_n$ is an approximate normalized focal length;
-- $h_B$ is normalized detected box height.
+```text
+d_hat = approximate object distance in meters
+H_r   = assumed reference height for the detected class in meters
+f_n   = normalized focal-length approximation
+h_B   = normalized detected bounding-box height
+```
 
-The current mobile implementation uses
+Current mobile approximation:
 
-$$
+```text
 f_n = 0.87
-$$
+```
 
-as a rough approximation for a typical phone camera near a 60° vertical field of view. The result is bounded to a practical range:
+The output is bounded before being used:
 
-$$
-\hat d \in [0.4,20]\;\text{m}.
-$$
+```text
+0.4 m <= d_hat <= 20.0 m
+```
 
-Reference-size classes currently include examples such as person, bicycle, car, motorcycle, bus, train, truck, traffic light, stop sign, parking meter, bench, chair, couch, toilet, and refrigerator.
+Reference-size classes currently include examples such as:
 
-For classes without a reliable reference height, WVAB does **not** invent a precise meter value. It falls back to broad visual range language derived from the proximity band.
+- person;
+- bicycle;
+- car;
+- motorcycle;
+- bus;
+- train;
+- truck;
+- traffic light;
+- stop sign;
+- parking meter;
+- bench;
+- chair;
+- couch;
+- toilet;
+- refrigerator.
 
-### 5.5 Controlled calibrated distance
+A single RGB phone camera cannot provide certified metric depth from an arbitrary object. If a class does not have a stable enough reference size, WVAB uses a broad visual range instead of inventing a precise meter value.
 
-The Python utility `core.proximity.estimate_metric_distance()` implements the standard pinhole relationship when explicit calibration is supplied:
+### 5.5 Controlled calibrated pinhole distance
 
-$$
-d = \frac{H f_y}{h_p}
-$$
+The Python utility `core.proximity.estimate_metric_distance()` uses the standard pinhole relationship when explicit calibration is provided:
+
+```text
+d = (H × f_y) / h_p
+```
 
 where:
 
-- $H$ = assumed physical object height in meters;
-- $f_y$ = calibrated vertical focal length in pixels;
-- $h_p$ = detected object height in pixels;
-- $d$ = estimated distance in meters.
+```text
+H   = assumed physical object height in meters
+f_y = calibrated vertical focal length in pixels
+h_p = detected object height in pixels
+d   = estimated distance in meters
+```
 
-This equation becomes meaningful only when the camera intrinsics and object-size assumption are documented. For an academic evaluation, report the camera, calibration method, test range, mean absolute error (MAE), root mean square error (RMSE), and known failure cases.
+This equation is academically meaningful only when the following are documented:
 
-Recommended error metrics are
+- camera model;
+- camera intrinsics;
+- calibration procedure;
+- physical object-size assumption;
+- test range;
+- lighting/viewpoint conditions;
+- expected error and failure cases.
 
-$$
-\operatorname{MAE}=\frac{1}{N}\sum_{i=1}^{N}|\hat d_i-d_i|
-$$
+### 5.6 Distance-error metrics
 
-and
+For a dataset containing N samples, predicted distance `d_hat_i`, and ground-truth distance `d_i`:
 
-$$
-\operatorname{RMSE}=\sqrt{\frac{1}{N}\sum_{i=1}^{N}(\hat d_i-d_i)^2}.
-$$
+**Mean Absolute Error (MAE)**
 
-### 5.6 Focus selection
+```text
+MAE = (1 / N) × sum(|d_hat_i - d_i|), for i = 1 ... N
+```
 
-WVAB does not use `person` as a hard-coded top class. Candidate detections are ordered by a risk-oriented lexicographic policy:
+**Root Mean Square Error (RMSE)**
+
+```text
+RMSE = sqrt((1 / N) × sum((d_hat_i - d_i)^2)), for i = 1 ... N)
+```
+
+These metrics should be reported with sample count, distance range, camera, object classes, and calibration conditions.
+
+### 5.7 Focus selection
+
+WVAB does not give `person` a hard-coded top priority. Candidate detections are compared lexicographically in this order:
 
 1. nearer proximity band;
-2. larger normalized box height;
+2. larger normalized bounding-box height;
 3. closer position to the central walking corridor;
 4. larger bounding-box area;
 5. higher detector confidence;
-6. label only as a deterministic final tie-break.
+6. object label only as the final deterministic tie-break.
 
-Conceptually, the priority is
+Conceptually:
 
-$$
-R_i = \operatorname{lexicographic}\left(
--r_P(i),
-+h_i,
--r_C(i),
-+A_i,
-+p_i
-\right)
-$$
+```text
+RiskPriority(i) = lexicographic(
+    proximity_rank(i),
+    -box_height(i),
+    center_rank(i),
+    -box_area(i),
+    -confidence(i),
+    label(i)
+)
+```
 
-where $r_P$ is proximity rank, $h_i$ box height, $r_C$ center rank, $A_i$ box area, and $p_i$ detector confidence. The code implements explicit comparisons rather than collapsing these terms into an arbitrary weighted sum.
+Lower proximity rank means greater urgency. Larger box height and area are sorted earlier by the negative signs shown above.
 
-### 5.7 Focus stability and preemption
+The implementation uses explicit comparisons instead of an arbitrary weighted score, so changing one scale cannot accidentally dominate all other factors.
 
-The default focus hold is
+### 5.8 Focus stability and preemption
 
-$$
-T_{hold}=2\;\text{s}
-$$
+Default timing:
 
-and the same guidance state has a default announcement cooldown of
+```text
+focus_hold = 2 seconds
+announcement_cooldown = 4 seconds
+```
 
-$$
-T_{cooldown}=4\;\text{s}.
-$$
+A held focus remains active while the same object class is still visible during the hold period. A newly detected object may preempt it when the new object belongs to a strictly nearer proximity band.
 
-A held object remains the spoken focus while it is still visible unless a new candidate enters a strictly nearer proximity band. This gives the audio channel temporal stability while still allowing urgent hazards to preempt stale guidance.
+This reduces rapid speech switching while preserving urgent hazard preemption.
 
-### 5.8 Lane occupancy
+### 5.9 Lane occupancy
 
-The guidance engine divides the normalized image into overlapping left, center, and right regions. For a lane $L=[l,r]$, each detection contributes according to its horizontal overlap, visual height, and proximity weight.
+The image is divided into overlapping normalized horizontal regions:
 
-For detection $i$:
+```text
+left   = [0.00, 0.38]
+center = [0.31, 0.69]
+right  = [0.62, 1.00]
+```
 
-$$
-o_i = \max\left(0,\min(x_{2,i},r)-\max(x_{1,i},l)\right)
-$$
+For a lane `L = [l, r]`, horizontal overlap of detection `i` is:
 
-and lane occupancy is
+```text
+o_i = max(0, min(x2_i, r) - max(x1_i, l))
+```
 
-$$
-O_L = \sum_i \left(\frac{o_i}{r-l}\right) h_i w_{P_i}.
-$$
+Lane width is:
 
-The current proximity weights are:
+```text
+lane_width = r - l
+```
+
+Each detection contributes:
+
+```text
+contribution_i = (o_i / lane_width) × h_i × w_P(i)
+```
+
+Total lane occupancy is:
+
+```text
+O_L = sum(contribution_i)
+```
+
+Current proximity weights:
 
 | Proximity | Weight |
 |---|---:|
@@ -429,83 +489,143 @@ The current proximity weights are:
 | medium | `0.38` |
 | far | `0.10` |
 
-The current normalized lane ranges are approximately:
+The overlap between lane regions makes the heuristic less sensitive to boxes positioned exactly at a region boundary.
 
-- left: `[0.00, 0.38]`
-- center: `[0.31, 0.69]`
-- right: `[0.62, 1.00]`
+### 5.10 Route cue logic
 
-The overlap between regions makes the score less sensitive to a box lying exactly on a lane boundary.
+The Flutter mobile route cue belongs to this set:
 
-### 5.9 Route cue logic
+```text
+NavigationCue = { moveLeft, moveRight, forward, stop }
+```
 
-The mobile route cue is chosen from
+The blocked threshold depends on focused-object proximity:
 
-$$
-C \in \{\text{moveLeft},\text{moveRight},\text{forward},\text{stop}\}.
-$$
+```text
+blocked_threshold = 0.42, when proximity == immediate
+blocked_threshold = 0.62, otherwise
+```
 
-The blocked threshold depends on the focused object's proximity:
+The decision rules are intentionally conservative:
 
-$$
-\tau =
-\begin{cases}
-0.42, & P=\text{immediate}\\
-0.62, & \text{otherwise}
-\end{cases}
-$$
+- if all relevant regions appear blocked, return `stop`;
+- if an immediate hazard strongly blocks both side options, return `stop`;
+- if an obstacle is on the left and the right region appears less occupied, prefer `moveRight`;
+- if an obstacle is on the right and the left region appears less occupied, prefer `moveLeft`;
+- when the center appears blocked, compare left and right occupancy;
+- if the focused object is visually far, normal preference is `forward`.
 
-If all relevant regions appear blocked, or an immediate hazard occupies both side options strongly enough, WVAB issues `STOP`. If the focused obstacle is on one side and the opposite side has lower occupancy, the app suggests the opposite side. If the center is occupied, left and right scores are compared.
+This is a **visual-clearance heuristic**. It is not a ground-plane path planner and cannot prove that a suggested direction is physically safe.
 
-This is a **visual-clearance heuristic**, not a ground-plane path planner. It cannot see holes, transparent barriers, stairs outside the detector classes, slippery surfaces, or obstacles outside the current camera field of view.
+### 5.11 Detector confidence
 
-### 5.10 Detector confidence
+A candidate detection is accepted only when its confidence meets the configured threshold:
 
-For each candidate detection, the mobile runtime accepts model output only when
+```text
+p_i >= tau_c
+```
 
-$$
-p_i \ge \tau_c
-$$
+Current mobile default:
 
-where the default mobile confidence threshold is
+```text
+tau_c = 0.25
+```
 
-$$
-\tau_c = 0.25.
-$$
+Lower confidence thresholds may increase recall but also increase false positives. Higher thresholds may reduce weak detections but miss partially visible, small, poorly lit, or motion-blurred objects.
 
-Lowering this threshold can improve recall but also increases false positives. Raising it reduces weak detections but can miss partially visible or poorly illuminated objects. Evaluation should therefore report class-level precision/recall rather than selecting a threshold by visual impression alone.
+A proper evaluation should therefore report class-level precision, recall, and preferably mAP rather than selecting a threshold by visual impression alone.
 
-### 5.11 MiDaS and scale ambiguity
+### 5.12 Precision, recall, and F1
 
-The optional MiDaS path estimates relative monocular depth. A monocular network can infer depth ordering and scene structure, but its raw scale is not automatically metric.
+For true positives `TP`, false positives `FP`, and false negatives `FN`:
 
-A simplified relationship is
+```text
+Precision = TP / (TP + FP)
+Recall    = TP / (TP + FN)
+F1        = 2 × Precision × Recall / (Precision + Recall)
+```
 
-$$
-z_{metric} = s\,z_{relative}
-$$
+When evaluating object detection, matching must also define an IoU threshold.
 
-where the scale $s$ must come from external calibration or another trusted metric source. WVAB therefore gates metric occupancy/navigation use until calibration is explicitly enabled.
+Intersection over Union is:
+
+```text
+IoU = area(predicted_box ∩ ground_truth_box)
+      / area(predicted_box ∪ ground_truth_box)
+```
+
+### 5.13 Latency metrics
+
+One average latency number is not enough for an assistive real-time system. WVAB production-readiness work expects distributions such as:
+
+```text
+p50 = median latency
+p95 = 95th percentile latency
+p99 = 99th percentile latency
+```
+
+Useful measurements include:
+
+- camera frame acquisition latency;
+- preprocessing latency;
+- inference latency;
+- post-processing latency;
+- camera-to-speech latency;
+- reconnect/recovery time.
+
+### 5.14 MiDaS and scale ambiguity
+
+The optional MiDaS path estimates relative monocular depth. Raw monocular depth is scale ambiguous.
+
+A simplified calibrated relation is:
+
+```text
+z_metric = scale × z_relative
+```
+
+The scale factor must come from external calibration or another trusted metric reference. WVAB therefore does not treat raw MiDaS values as meters by default.
+
+### 5.15 Metric consistency for mapping
+
+If metric depth is enabled, the same unit scale must be applied consistently to mapping and motion estimation.
+
+Conceptually:
+
+```text
+metric_translation = scale × relative_translation
+metric_depth       = scale × relative_depth
+```
+
+If metric visual-odometry scale is lost, the navigation path must degrade rather than mixing arbitrary-unit motion with metric occupancy data.
 
 ---
 
 ## 6. Navigation and fail-safe semantics
 
-`navigation_pipeline.py` publishes an atomic safety state rather than pretending that every path is valid.
+`navigation_pipeline.py` publishes an atomic state rather than pretending every generated path is safe.
 
 | State | Meaning |
 |---|---|
 | `STOP` | Camera, localization, or usable path is unavailable |
 | `DEGRADED` | A path exists but metric geometry/localization is not sufficiently calibrated or fresh |
-| `GUIDANCE_AVAILABLE` | A path exists using coherent, explicitly calibrated metric mapping/localization inputs |
+| `GUIDANCE_AVAILABLE` | A path exists using coherent explicitly calibrated metric mapping/localization inputs |
 
-The navigation state is an integration boundary. It is not a certified actuator command.
+This state is an integration boundary. It is not a certified actuator command.
 
-### Metric consistency
+### Fail-closed behavior
 
-When metric depth is enabled, the same distance scale must be used consistently by mapping and motion estimation. A temporary loss of metric visual-odometry scale must degrade guidance rather than injecting arbitrary unit translations into the map.
+The navigation research path is expected to behave as follows:
 
-External ORB-SLAM3 output is treated as stale when its pose source stops updating.
+```text
+camera unavailable         -> STOP
+localization unavailable   -> STOP
+path unavailable           -> STOP
+uncalibrated metric state  -> DEGRADED
+stale metric localization  -> DEGRADED
+calibrated + fresh + path  -> GUIDANCE_AVAILABLE
+```
+
+External ORB-SLAM3 pose input expires when the source stops updating. Stale pose data must not remain silently valid.
 
 ---
 
@@ -515,35 +635,33 @@ WVAB's wearable/remote camera path uses authenticated encrypted UDP rather than 
 
 ### Security properties
 
-- AES-GCM authentication and encryption are enabled by default.
+- AES-GCM encryption/authentication is enabled by default.
 - AES keys may be 16, 24, or 32 bytes; 32 bytes are recommended.
 - Tokens must be at least 16 characters.
-- Each sender boot creates a fresh non-zero 32-bit session ID.
-- The complete 14-byte protocol header is authenticated as AES-GCM Additional Authenticated Data (AAD).
-- Authentication protocol v2 binds:
-  - protocol version;
-  - monotonic 64-bit authentication counter;
-  - sender next-frame ID;
-  - deployment token.
-- Legacy token-only authentication is rejected.
-- Authentication nonces are replay checked.
-- Highest accepted authentication counters are persisted before a session is granted or renewed.
-- Completed frame IDs are replay/order checked per authenticated source/session.
-- A newly authenticated sender session retires the old live session for that source.
+- Each real deployment should use unique credentials.
+- Authentication plaintext uses protocol v2.
+- Sender boot creates a fresh non-zero 32-bit session ID.
+- Authentication includes a monotonic 64-bit counter.
+- Authentication also binds the sender's next frame ID.
+- Complete 14-byte UDP headers are authenticated as AAD.
+- Completed frame IDs are replay/order checked.
+- Persistent replay state survives normal service/container restarts.
+- A newer authenticated sender session retires the previous live session.
+- Authentication refresh may advance the replay baseline but never move it backwards.
 
 ### Replay invariant
 
-For an authentication refresh with counter $c_{new}$ and persisted maximum $c_{max}$, normal acceptance requires a strictly newer counter:
+A simplified security invariant is:
 
-$$
-c_{new} > c_{max}.
-$$
+```text
+accepted_auth_counter_new > highest_persisted_auth_counter
+```
 
-The persisted value is updated before the authenticated session is considered active. This is why the replay-state file is part of the security boundary.
+and completed video-frame ordering follows a wrap-aware serial-number comparison rather than naive integer comparison.
 
-**Do not delete, roll back, or restore an older replay-state file during a deployment.** If replay state is lost, rotate/re-pair the UDP credentials before field use.
+Replay-state persistence is part of the security boundary. If the replay-state file or Docker replay-state volume is lost, deleted, or rolled back, rotate/re-pair device credentials before field use.
 
-For the exact packet contract and recovery procedure, read [`SECURE_UDP_PROTOCOL.md`](SECURE_UDP_PROTOCOL.md).
+See `SECURE_UDP_PROTOCOL.md` for the complete wire contract.
 
 ---
 
@@ -551,61 +669,66 @@ For the exact packet contract and recovery procedure, read [`SECURE_UDP_PROTOCOL
 
 ```text
 .
-├── assets/                     Fonts and shared assets
-├── config/                     Runtime/navigation configuration
-├── core/                       Shared Python security, proximity and runtime logic
-├── deployment/                 Raspberry Pi and Docker deployment assets
-├── mobile/flutter/             Standalone Flutter Android application
-│   ├── assets/                 Mobile ONNX model + translations
-│   ├── lib/                    App, controller, vision, history, settings, legal/help UI
-│   ├── test/                   Flutter unit/widget regression tests
-│   ├── tool/                   Android/model/branding generation and verification
-│   └── demo/                   Versioned demo APK documentation/artifact
-├── training/                   Custom dataset configuration/support
-├── tools/                      Provisioning, model download, soak/evidence utilities
-├── main.py                     Root command dispatcher
-├── navigation_pipeline.py      Experimental mapping/planning pipeline
-├── smartphone_camera.py        Trusted phone/IP camera launcher
-├── udp_streaming.py            Secure remote camera runtime
-├── vision_server.py            Local camera detection runtime
-├── PRODUCTION_READINESS.md     Release/field-readiness evidence gate
-├── PROJECT_OWNERSHIP.md        Authorship and attribution boundary
-├── THIRD_PARTY_NOTICES.md      Third-party software/model/font inventory
-└── LICENSE                     MIT license for original WVAB code
+├── assets/                     fonts and related runtime assets
+├── config/                     project/navigation configuration
+├── core/                       shared Python security/runtime/proximity modules
+├── deployment/                 Raspberry Pi and Docker deployment tooling
+├── mobile/
+│   └── flutter/                standalone Android application
+├── navigation/                 navigation/planning components
+├── tests/                      Python/system regression tests
+├── tools/                      model, diagnostics, security and soak tooling
+├── training/                   custom-model dataset configuration
+├── vision_server.py            local vision runtime
+├── udp_streaming.py            secure UDP camera runtime
+├── navigation_pipeline.py      experimental navigation integration
+├── smartphone_camera.py        trusted IP/smartphone camera launcher
+├── main.py                     command dispatcher
+├── PRODUCTION_READINESS.md     release/field-readiness evidence gate
+├── SECURE_UDP_PROTOCOL.md      transport security contract
+├── THIRD_PARTY_NOTICES.md      third-party licensing inventory
+└── README.md                   primary project documentation
 ```
 
 ---
 
 ## 9. Requirements
 
-### Python runtime
+Primary Python runtime:
 
-- Python `3.10+`
-- local YOLO model for offline detection
+- Python `3.10+`;
+- local YOLO model for offline detection;
+- platform camera/device dependencies as required by the selected runtime.
 
-Install the standard runtime dependencies:
+Install core requirements:
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-Optional export/accelerator dependencies are separated deliberately:
+Optional export/accelerator packages:
 
 ```bash
 python -m pip install -r requirements-accelerators.txt
 ```
 
-`setup.cfg` is the canonical package metadata source. `pyproject.toml` defines the build backend and pytest configuration.
+`setup.cfg` is the canonical Python package metadata source. `pyproject.toml` defines the build backend and pytest configuration.
 
-### Mobile runtime
+### Model assets
 
-The source contract currently pins Flutter `3.47.0`. Android release builds are generated in CI and may also be built locally with the same version.
+The repository retains `yolov8n.pt` as its offline baseline model. This is a **third-party model asset**, not original MIT-licensed WVAB code. See `THIRD_PARTY_NOTICES.md`.
+
+MiDaS weights are intentionally not committed. Provision them explicitly:
+
+```bash
+python tools/download_models.py midas
+```
+
+The provisioner validates the expected checksum and prepares the local cache used for later offline depth startup.
 
 ---
 
 ## 10. Quick start
-
-Recommended source-checkout flow:
 
 ```bash
 ./quick_start.sh setup
@@ -614,7 +737,7 @@ Recommended source-checkout flow:
 ./quick_start.sh run vision --camera 0
 ```
 
-Equivalent dispatcher commands:
+Or use the root dispatcher:
 
 ```bash
 python main.py --help
@@ -622,76 +745,46 @@ python main.py doctor --full --camera 0
 python main.py vision --camera 0
 ```
 
-See [`QUICK_START.md`](QUICK_START.md) for additional supported launch paths.
-
-### Offline model assets
-
-The repository retains `yolov8n.pt` as the baseline third-party YOLO asset.
-
-The larger MiDaS weight is intentionally excluded from source control. Provision it once while online:
-
-```bash
-python tools/download_models.py midas
-```
-
-The provisioner validates the expected checksum and prepares the local Torch Hub source cache. If required assets are missing while `WVAB_OFFLINE=1`, the depth path disables cleanly rather than silently downloading from the network.
+See `QUICK_START.md` for the complete supported launch flows.
 
 ---
 
 ## 11. Flutter mobile build
-
-### Development validation
 
 ```bash
 cd mobile/flutter
 flutter pub get
 flutter analyze
 flutter test
-```
-
-### Generate Android host project and branding
-
-```bash
 bash tool/bootstrap_android.sh
-```
-
-### Build release APKs
-
-```bash
 flutter build apk --release --split-per-abi
 ```
 
-Expected outputs include:
+The mobile CI additionally verifies:
+
+- exact visible version contract `1.0.0`;
+- expected Flutter/plugin versions;
+- generated Android host configuration;
+- camera, vibration, network, and TTS declarations;
+- Android ONNX Runtime resolution;
+- ONNX model shape/class count/checksum;
+- release APK ABI outputs;
+- arm64 ONNX Runtime ELF packaging;
+- absence of wrong-platform glibc dependencies;
+- Android package name;
+- `versionName=1.0.0`.
+
+### Demo APK
+
+The repository demo directory is:
 
 ```text
-build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
-build/app/outputs/flutter-apk/app-x86_64-release.apk
+mobile/flutter/demo/
 ```
 
-### What CI verifies for mobile
+The demo README records the verified artifact metadata and checksum for the published Android arm64 build.
 
-The Mobile Flutter workflow checks more than compilation:
-
-- exact `v1.0.0+8` dependency/version contract;
-- offline ONNX export and model checksum;
-- model input shape `1 × 3 × 320 × 320`;
-- exactly 80 detector classes;
-- Dart analysis;
-- Flutter tests;
-- Android permissions and TTS service declaration;
-- launcher branding integrity;
-- Android ONNX Runtime resolved to `1.22.0`;
-- required ONNX keep rules;
-- release minification/shrinking configuration;
-- split release APK creation;
-- presence of ARM64 `libonnxruntime.so`;
-- rejection of Linux/glibc native dependencies inside the Android APK;
-- Android package name and `versionName=1.0.0`.
-
-The verified demo APK documentation is in [`mobile/flutter/demo/`](mobile/flutter/demo/).
-
-GitHub Actions can verify build and packaging behavior, but it cannot prove every physical phone camera, OEM camera stack, speaker, TTS engine, battery, or thermal condition.
+Passing CI does not prove physical-camera, speaker, OEM-driver, thermal, or battery behavior on every Android device.
 
 ---
 
@@ -704,18 +797,16 @@ python tools/generate_device_secrets.py --server-ip 192.168.4.2
 ./quick_start.sh doctor --deployment
 ```
 
-This creates git-ignored deployment files such as:
-
-- `esp32_secrets.h`
-- `deployment/rpi/wvab_edge.env`
-
-The generated Raspberry Pi environment also configures persistent replay state at:
+This creates git-ignored deployment credentials such as:
 
 ```text
-state/udp_replay_state.json
+esp32_secrets.h
+deployment/rpi/wvab_edge.env
 ```
 
-Flash `esp32_cam_stream.ino` with the generated header, then run:
+The generated Pi environment also configures persistent UDP replay state.
+
+Flash `esp32_cam_stream.ino` with the generated credentials, then run:
 
 ```bash
 ./quick_start.sh run esp32
@@ -723,47 +814,49 @@ Flash `esp32_cam_stream.ino` with the generated header, then run:
 
 ### Raspberry Pi service
 
-The systemd installer uses the project virtual environment and requires Python 3.10+:
-
 ```bash
 sudo bash deployment/rpi/install_service.sh
 systemctl status wvab_edge.service
 ```
 
-The service works from the project root so replay state survives normal process/service restarts.
+The service uses the project virtual environment and persistent project state so replay protection survives normal restarts.
 
 ---
 
 ## 13. Smartphone and IP cameras
 
-WVAB expects an explicit trusted stream URL. It does not scan the local network for cameras.
+WVAB does not scan the local subnet for camera devices. Supply an explicit trusted stream URL:
 
 ```bash
 python main.py phone http://192.168.1.20:8080/video --test-only
 python main.py phone http://192.168.1.20:8080/video
 ```
 
-The trusted local/IP runtime does not expose a remote control socket and does not convert uncalibrated box-size heuristics into authoritative metric distance.
+The local/IP runtime does not reinterpret uncalibrated bounding-box proximity as certified metric distance.
 
 ---
 
 ## 14. Python secure UDP streaming
 
-For a Python camera sender, configure a unique key and token:
+Set unique credentials:
 
 ```bash
 export WVAB_UDP_KEY_HEX="<16/24/32-byte-key-as-hex>"
 export WVAB_UDP_TOKEN="<unique-token-at-least-16-characters>"
+```
 
+Start server and sender:
+
+```bash
 python main.py udp-server --config wvab_config.sample.json
 python main.py udp-client --config wvab_config.sample.json --server-ip 127.0.0.1 --camera 0
 ```
 
 Authentication and encryption are required by default.
 
-`WVAB_ALLOW_INSECURE_UDP=1` exists only as an explicit isolated-development exception. Do not use it for normal wearable or field deployment.
+`WVAB_ALLOW_INSECURE_UDP=1` is an explicit isolated-development exception and must not be used for normal wearable/field deployment.
 
-WebSocket control binds to `127.0.0.1:8765` by default and requires a secret for every command. Remote binding should be placed behind an explicitly trusted and protected network boundary with a dedicated `WVAB_WS_TOKEN`.
+WebSocket control binds to `127.0.0.1:8765` by default and authenticates every command. Remote exposure should be treated as a deliberate deployment/security decision.
 
 ---
 
@@ -777,17 +870,11 @@ bash deployment/docker_start.sh build
 bash deployment/docker_start.sh up -d udp-vision-server
 ```
 
-Use the wrapper rather than plain `docker compose up` when generated ports are involved; it applies `WVAB_UDP_PORT` consistently to the container and host mapping.
+Use the wrapper when generated custom UDP ports are in use so host and container configuration remain consistent.
 
-The image runs as non-root user `wvab`. Persistent replay state is stored in the `wvab-replay-state` named volume at:
+The image runs as a non-root `wvab` user. Persistent replay state is stored in the configured Docker replay-state volume and must be preserved across normal upgrades/recreation.
 
-```text
-/var/lib/wvab/udp_replay_state.json
-```
-
-If that volume is intentionally deleted or restored from stale backup, re-pair/rotate credentials before field use.
-
-Optional headless navigation and Prometheus on Linux:
+Optional headless navigation + Prometheus on Linux:
 
 ```bash
 export WVAB_VIDEO_GID="$(getent group video | cut -d: -f3)"
@@ -795,13 +882,13 @@ export WVAB_CAMERA_DEVICE=/dev/video0
 bash deployment/docker_start.sh --profile navigation up -d navigation-engine prometheus
 ```
 
-Host metrics ports bind only to loopback (`127.0.0.1:8000` and `127.0.0.1:9090`).
+Metrics ports are intended to bind to loopback by default.
 
 ---
 
 ## 16. Training and model export
 
-The canonical trainer validates local dataset splits, numeric arguments, and offline/local model behavior.
+Canonical custom-model workflow:
 
 ```bash
 python train_navigation_model.py train \
@@ -834,196 +921,199 @@ python -m pip install -r requirements-accelerators.txt
 python export_accelerated_models.py --format openvino
 ```
 
-### Custom mobility classes
-
-The stock mobile model contains the 80 COCO classes. Classes such as custom `pothole`, `curb`, `crosswalk`, or `stairs` require a compatible model trained to emit those labels. The application must not invent a label that the detector was never trained to produce.
-
-For research results, report at least:
-
-- dataset source and split strategy;
-- class distribution;
-- input resolution;
-- confidence threshold;
-- IoU/NMS settings;
-- per-class precision and recall;
-- mAP@0.5 and preferably mAP@0.5:0.95;
-- latency on the actual deployment hardware;
-- difficult environmental cases such as low light, blur, occlusion, glare, and crowded scenes.
+The current Flutter model supports the standard 80 COCO classes. Potholes, curbs, stairs, or other custom mobility-specific classes require a compatible custom-trained model if they are not part of the active model's output vocabulary.
 
 ---
 
 ## 17. Testing and CI
 
-### Python tests
+Fast Python validation:
 
 ```bash
 python -m pip install -r requirements-ci.txt
 python -m pytest -q
 ```
 
-### Host diagnostics
+Full host diagnostics:
 
 ```bash
 ./quick_start.sh doctor --full --camera 0 --tts
 ```
 
-### Runtime soak evidence
+Soak tools:
 
 ```bash
 python tools/soak_monitor.py --help
 python tools/summarize_soak.py --help
 ```
 
-### CI coverage
+Automated validation covers major software contracts including:
 
-The repository's automated validation includes:
-
-- Python 3.10 / 3.11 / 3.12;
-- wheel content and isolated installed imports;
-- cryptographic UDP tests;
-- authentication and frame replay tests;
-- restart/replay-state behavior;
+- Python 3.10 / 3.11 / 3.12 tests;
+- package/wheel verification;
+- UDP cryptographic/replay behavior;
 - Python compilation;
-- shell/CLI syntax;
-- clean C++17 planner build/demo;
-- repository hygiene and secret exclusion;
-- Docker replay-state/custom-port invariants;
-- actual ESP32 firmware compilation;
+- C++17 planner build/demo;
+- repository hygiene;
+- secret exclusion;
+- Docker invariants;
+- ESP32 firmware compilation;
 - Flutter analysis/tests;
-- Android release APK and native runtime inspection.
+- Android release APK construction;
+- Android ONNX native-library inspection.
 
-CI is reproducibility evidence, not field-validation evidence.
+CI is reproducibility evidence. It is not field-validation evidence.
 
 ---
 
 ## 18. Production-readiness boundary
 
-WVAB contains **production-oriented engineering controls**, including release builds, explicit version contracts, authenticated transport, replay protection, CI, deterministic asset verification, local-first storage, fail-safe navigation states, and deployment tooling.
+WVAB contains **production-oriented engineering controls**, but it must not be described as a certified production mobility device without hardware/user validation.
 
-That does **not** mean the project is already certified for independent mobility use.
+Engineering controls already represented in the repository include:
 
-Before any field-ready claim, the release evidence should include at least:
+- automated multi-version CI;
+- secure transport defaults;
+- persistent replay protection;
+- bounded state/memory policies;
+- fail-safe navigation states;
+- Android release builds;
+- model/native runtime verification;
+- Docker/Raspberry Pi deployment tooling;
+- dependency and artifact checks;
+- documented recovery procedures.
 
-- 8+ hour continuous soak test;
-- bounded memory behavior;
-- camera disconnect/reconnect recovery;
-- network/TTS dropout recovery;
-- authentication/header/replay fault injection;
-- sender and server reboot behavior;
-- replay-state corruption/loss procedure;
-- model accuracy on representative mobility hazards;
-- calibrated distance MAE/RMSE if metric distance is claimed;
-- localization error statistics if metric navigation is claimed;
-- end-to-end camera-to-audio latency p50/p95/p99;
-- sustained FPS;
-- battery runtime;
-- CPU/GPU/temperature behavior;
-- physical Android device coverage;
-- Raspberry Pi/ESP32 hardware revision records;
-- structured blind/low-vision user evaluation under appropriate ethics/consent procedures.
+Before a field-ready claim, record evidence for at least:
 
-The detailed checklist is maintained in [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
+- 8+ hour continuous soak testing;
+- memory/CPU/GPU/temperature trends;
+- camera disconnect/reconnect behavior;
+- network/sender failure and recovery;
+- TTS failure/recovery;
+- replay/tamper rejection;
+- sender and server restart behavior;
+- model precision/recall/mAP on representative mobility scenes;
+- calibrated distance MAE/RMSE where metric claims are made;
+- end-to-end latency p50/p95/p99;
+- battery and thermal behavior on target hardware;
+- accessibility testing with blind/low-vision participants under appropriate ethics/consent procedures.
+
+See `PRODUCTION_READINESS.md` for the full evidence gate.
 
 ---
 
 ## 19. Privacy
 
-The Android application is designed as a local-first assistive runtime.
+The Flutter phone-camera path is designed as local-first processing.
 
-Current mobile behavior:
+Current mobile behavior stores locally:
 
-- phone-camera frames are processed locally by the bundled ONNX detector;
-- the app does not require a WVAB cloud account;
-- no WVAB advertising SDK is part of the current mobile implementation;
-- no WVAB analytics upload service is part of the current mobile implementation;
-- name, language, settings, and detection history are stored locally in app storage;
-- detection history stores metadata, not intentional camera photo/video archives;
-- ESP32 pairing/authentication material is stored using Android secure-storage facilities;
-- history can be cleared from the app;
-- app data can also be removed using Android storage controls or uninstall.
+- entered user name;
+- selected language;
+- app preferences;
+- selected classes;
+- confidence threshold;
+- recent detection-history events;
+- configured ESP32 connection credentials in secure storage.
 
-Android TTS may depend on voice packages or services installed on the user's device; their behavior and privacy terms are outside the WVAB codebase.
+Detection history contains metadata such as label, timestamp, confidence, proximity, direction, and camera source. It is not intended to store camera photographs or videos.
 
-The app includes an in-app Privacy Policy with the same implementation boundary.
+The current mobile implementation does not include a WVAB advertising SDK, WVAB analytics upload service, or mandatory WVAB cloud account.
+
+Android TTS behavior may depend on voice packs and services installed on the device.
 
 ---
 
 ## 20. Licensing
 
-Original WVAB source code is distributed under the repository **MIT License**.
+Original WVAB repository code is distributed under the repository **MIT License**.
 
-Third-party software, models, fonts, datasets, and transitive dependencies retain their own licenses and are not relicensed merely because WVAB uses or stores them.
+Third-party components keep their own licenses and are not relicensed merely because they appear in or are used by WVAB.
 
 Important examples include:
 
 - Ultralytics software/model assets;
-- the bundled `yolov8n.pt` / exported YOLO model asset;
+- YOLO model weights;
 - MiDaS components/model assets;
 - ONNX Runtime;
-- Flutter/Dart packages;
-- Noto fonts.
+- Flutter/Dart dependencies;
+- Noto fonts;
+- external datasets.
 
-Before redistribution or commercial deployment, review:
+Review these files before redistribution or commercial deployment:
 
-- [`LICENSE`](LICENSE)
-- [`PROJECT_OWNERSHIP.md`](PROJECT_OWNERSHIP.md)
-- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
+```text
+LICENSE
+PROJECT_OWNERSHIP.md
+THIRD_PARTY_NOTICES.md
+```
 
-The Flutter app also exposes the installed package license registry from its Open Source Licenses screen.
+The bundled YOLO baseline model is a third-party model asset and must not be described as an original WVAB-owned AI model.
 
 ---
 
-## 21. Academic use and citation
+## 21. Academic use and reproducibility
 
-WVAB can be used as a software platform for experiments in assistive computer vision, secure edge-camera streaming, human-centered audio guidance, monocular distance estimation, perception-driven navigation, and edge deployment.
+WVAB may be used as a software research platform, but academic claims should identify the exact experimental configuration.
 
-When publishing results, distinguish clearly between:
+A reproducible report should include:
 
-- **detector output**;
-- **qualitative proximity**;
-- **approximate monocular meter estimates**;
-- **externally calibrated metric distance**;
-- **relative monocular depth**;
-- **metric localization**;
-- **visual-clearance route hints**;
-- **planner output**.
+- repository commit SHA;
+- mobile/app version if Android is used;
+- exact model identity and checksum;
+- dataset and split definition;
+- camera model and resolution;
+- preprocessing/input dimensions;
+- detector confidence threshold;
+- IoU/NMS settings;
+- CPU/GPU/accelerator configuration;
+- inference and end-to-end latency distributions;
+- distance-calibration procedure where metric distance is reported;
+- MAE/RMSE and distance range;
+- localization/depth scale source;
+- hardware and OS versions;
+- known limitations and failure cases.
 
-Do not report these as interchangeable measurements.
-
-If you cite the repository as software, a simple BibTeX entry is:
+### Suggested software citation
 
 ```bibtex
-@software{shagor_wvab_2026,
+@software{wvab_2026,
   author  = {Md Shahanur Islam Shagor},
   title   = {Wireless Vision-Aid for the Blind (WVAB)},
   year    = {2026},
-  version = {1.0.0},
   url     = {https://github.com/smshagor-dev/wireless-Vision-Aid-for-the-blind},
-  note    = {Assistive computer-vision and secure edge-camera research platform}
+  note    = {Open-source assistive computer-vision and edge-navigation research platform}
 }
 ```
 
-For reproducibility, academic results should additionally record the exact Git commit, model checksum, hardware, camera configuration, Android/Python runtime version, dataset version, and experiment configuration.
+For a paper or experiment, add the exact release/tag/commit used so another researcher can reproduce the software state.
 
 ---
 
 ## 22. Maintainer and contact
 
-**Md Shahanur Islam Shagor**  
-Project maintainer and original author of the WVAB-specific architecture, integration code, documentation, deployment tooling, and other original WVAB contributions unless repository history states otherwise.
+**Maintainer / Original WVAB project author:** Md Shahanur Islam Shagor
 
-- **GitHub:** [smshagor-dev](https://github.com/smshagor-dev)
-- **Website:** [smshagor.com](https://smshagor.com)
-- **Email:** [smshagor.dev@gmail.com](mailto:smshagor.dev@gmail.com)
-- **Mobile:** `+7 995 494-98-36`
-- **Repository:** [github.com/smshagor-dev/wireless-Vision-Aid-for-the-blind](https://github.com/smshagor-dev/wireless-Vision-Aid-for-the-blind)
+- GitHub: `smshagor-dev`
+- Website: `https://smshagor.com`
+- Email: `smshagor.dev@gmail.com`
+- Mobile: `+79954949836`
+- Repository: `https://github.com/smshagor-dev/wireless-Vision-Aid-for-the-blind`
 
-Bug reports and reproducible engineering issues are welcome through GitHub Issues. When reporting a mobile camera/detector problem, include the Android device model, Android version, camera source, exact build/commit, and what happened immediately before the failure.
+For technical bug reports, include:
+
+- operating system/device model;
+- Android version when applicable;
+- camera source;
+- exact commit or release;
+- model identity;
+- relevant logs;
+- steps required to reproduce the issue.
 
 ---
 
 ## Final engineering note
 
-WVAB is intentionally conservative about what it claims. A high-confidence object detection is not the same thing as safe navigation; a large bounding box is not a calibrated range sensor; monocular depth is not automatically metric; and a green CI run is not a substitute for target-device testing.
+WVAB is intentionally conservative about what the software claims to know. Object labels are detector outputs. Bounding-box proximity is a visual heuristic. Monocular meter estimates are approximations unless the camera/object assumptions are calibrated. A route that looks clearer in the image is not automatically a safe path. Metric mapping/navigation is gated by calibration and localization quality.
 
-The project is designed so those boundaries remain visible in the code, documentation, mobile UI, tests, and deployment process. That makes it more useful for serious development and research than a system that reports certainty it has not measured.
+That distinction is central to the project: **use computer vision to provide useful assistance without presenting uncertain estimates as guaranteed physical truth.**
