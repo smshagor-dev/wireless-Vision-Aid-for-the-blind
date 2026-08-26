@@ -1,20 +1,15 @@
-# WVAB Mobile v1.0.1 Camera-Stability Demo APK
+# WVAB Mobile v1.0.0 Demo APK
 
-`wvab-mobile-demo-arm64-v8a.apk` is the WVAB Mobile **v1.0.1** Android release demo for 64-bit ARM devices.
+This directory contains the verified Android arm64-v8a demo build for WVAB Mobile **v1.0.0**.
 
-- App version: 1.0.1 (build 7)
-- Camera lifecycle start/stop operations are serialized.
-- Stale camera permission/initialization sessions are invalidated before they can reuse disposed controllers.
-- Camera preview is established before ONNX inference initialization begins.
-- ONNX Runtime uses the CPU provider for device-stable native execution.
-- Camera and ESP32 teardown is defensive and idempotent.
-- Inference is throttled to reduce camera/native runtime pressure.
-- All 80 COCO classes supported by the bundled YOLOv8n model remain enabled by default.
-- Current restored WVAB launcher branding is retained.
-- Build type: optimized Flutter release APK.
-- ABI: arm64-v8a.
-- Minimum Android SDK: 24.
+- App version: `1.0.0`
+- ABI: `arm64-v8a`
+- APK: `wvab-mobile-demo-arm64-v8a.apk`
+- SHA256: `4458ab48b75d9218cb3e8459a31ae77f66297ad4b73f50b2ef68d8133d12ab37`
+- CI source run: `32929761223`
+- Detection model: bundled YOLOv8n 320 ONNX, 80 COCO classes
+- Android ONNX Runtime: forced to 1.22.0 with the Kotlin-safe Flutter wrapper
 
-This build specifically addresses the process crash observed when opening the phone camera.
+The CI gate verified Dart analysis, 31 Flutter tests including detection-to-speech invocation, Android/TTS/ProGuard contracts, resolved ONNX Runtime dependency, release APK build, arm64 native ELF packaging, bundled model presence, and `versionName=1.0.0`.
 
-Verify the APK against `SHA256SUMS.txt` after download.
+Physical phone camera/speaker behavior still depends on the target Android device and cannot be proven by GitHub Actions alone.
