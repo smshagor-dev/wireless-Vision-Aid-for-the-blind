@@ -1,5 +1,5 @@
 name: Publish latest WVAB v1.0.0 APK
-# rerun after privacy page validation fix
+# rerun after contact viewport test fix
 
 on:
   push:
