@@ -28,15 +28,13 @@ class SharedPreferencesSettingsStore implements SettingsStore {
             ? allCocoDetectedClasses
             : classes.where(allCocoDetectedClasses.contains).toSet());
     final storedConfidence = await _preferences.getDouble('${_prefix}detection_confidence');
-    // Schema 3 retunes the stock mobile detector from 0.50 to 0.25. Existing
-    // installs using an older schema receive the safer default once, while
-    // explicit user tuning made on schema 3+ is preserved.
     final detectionConfidence = detectionSchema < _detectionSchemaVersion
         ? 0.25
         : (storedConfidence ?? 0.25);
 
     return AppSettings(
       firstRunCompleted: await _preferences.getBool('${_prefix}first_run_completed') ?? false,
+      userName: (await _preferences.getString('${_prefix}user_name') ?? '').trim(),
       languageCode: language ?? 'en-US',
       cameraSource: cameraSourceFromStorage(source),
       speechEnabled: await _preferences.getBool('${_prefix}speech_enabled') ?? true,
@@ -51,6 +49,7 @@ class SharedPreferencesSettingsStore implements SettingsStore {
   @override
   Future<void> save(AppSettings settings) async {
     await _preferences.setBool('${_prefix}first_run_completed', settings.firstRunCompleted);
+    await _preferences.setString('${_prefix}user_name', settings.userName.trim());
     await _preferences.setString('${_prefix}language', settings.languageCode);
     await _preferences.setString('${_prefix}camera_source', settings.cameraSource.storageValue);
     await _preferences.setBool('${_prefix}speech_enabled', settings.speechEnabled);

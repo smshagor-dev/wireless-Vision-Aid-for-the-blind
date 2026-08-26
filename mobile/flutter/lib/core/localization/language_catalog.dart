@@ -1,0 +1,66 @@
+class LanguageCatalog {
+  const LanguageCatalog._();
+
+  static const supported = <String, String>{
+    'en-US': 'English (United States)',
+    'en-GB': 'English (United Kingdom)',
+    'bn-BD': 'বাংলা (Bangla)',
+    'ru-RU': 'Русский (Russian)',
+    'hi-IN': 'हिन्दी (Hindi)',
+    'ar-SA': 'العربية (Arabic)',
+    'es-ES': 'Español (Spanish)',
+    'fr-FR': 'Français (French)',
+    'de-DE': 'Deutsch (German)',
+    'it-IT': 'Italiano (Italian)',
+    'pt-BR': 'Português (Brasil)',
+    'pt-PT': 'Português (Portugal)',
+    'zh-CN': '中文（简体）',
+    'zh-TW': '中文（繁體）',
+    'ja-JP': '日本語 (Japanese)',
+    'ko-KR': '한국어 (Korean)',
+    'tr-TR': 'Türkçe (Turkish)',
+    'ur-PK': 'اردو (Urdu)',
+    'fa-IR': 'فارسی (Persian)',
+    'id-ID': 'Bahasa Indonesia',
+    'ms-MY': 'Bahasa Melayu',
+    'th-TH': 'ไทย (Thai)',
+    'vi-VN': 'Tiếng Việt',
+    'nl-NL': 'Nederlands (Dutch)',
+    'pl-PL': 'Polski (Polish)',
+    'uk-UA': 'Українська (Ukrainian)',
+    'cs-CZ': 'Čeština (Czech)',
+    'ro-RO': 'Română (Romanian)',
+    'hu-HU': 'Magyar (Hungarian)',
+    'el-GR': 'Ελληνικά (Greek)',
+    'sv-SE': 'Svenska (Swedish)',
+    'nb-NO': 'Norsk (Norwegian)',
+    'da-DK': 'Dansk (Danish)',
+    'fi-FI': 'Suomi (Finnish)',
+    'he-IL': 'עברית (Hebrew)',
+    'ta-IN': 'தமிழ் (Tamil)',
+    'te-IN': 'తెలుగు (Telugu)',
+    'ml-IN': 'മലയാളം (Malayalam)',
+    'kn-IN': 'ಕನ್ನಡ (Kannada)',
+    'mr-IN': 'मराठी (Marathi)',
+    'gu-IN': 'ગુજરાતી (Gujarati)',
+    'pa-IN': 'ਪੰਜਾਬੀ (Punjabi)',
+    'ne-NP': 'नेपाली (Nepali)',
+    'si-LK': 'සිංහල (Sinhala)',
+    'sw-KE': 'Kiswahili (Swahili)',
+    'af-ZA': 'Afrikaans',
+    'fil-PH': 'Filipino',
+    'ca-ES': 'Català (Catalan)',
+    'sk-SK': 'Slovenčina (Slovak)',
+    'bg-BG': 'Български (Bulgarian)',
+  };
+
+  static const fullInterfaceLocales = <String>{
+    'en-US',
+    'bn-BD',
+    'ru-RU',
+    'hi-IN',
+  };
+
+  static bool contains(String code) => supported.containsKey(code);
+  static bool hasFullInterface(String code) => fullInterfaceLocales.contains(code);
+}

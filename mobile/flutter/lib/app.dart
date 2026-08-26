@@ -15,12 +15,14 @@ class WvabMobileApp extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
+        final setupComplete = controller.settings.firstRunCompleted &&
+            controller.settings.userName.trim().isNotEmpty;
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           title: 'WVAB',
           theme: AppTheme.light(),
           themeMode: ThemeMode.light,
-          home: controller.settings.firstRunCompleted
+          home: setupComplete
               ? HomeScreen(controller: controller)
               : OnboardingScreen(controller: controller),
         );

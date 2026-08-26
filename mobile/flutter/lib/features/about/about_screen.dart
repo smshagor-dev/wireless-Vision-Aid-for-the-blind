@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/controllers/app_controller.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/ui_metrics.dart';
+import 'info_screens.dart';
 
 class AboutScreen extends StatelessWidget {
   const AboutScreen({super.key, required this.controller});
@@ -47,7 +48,7 @@ class AboutScreen extends StatelessWidget {
             style: const TextStyle(fontSize: 16, height: 1.4, color: Color(0xFF4C5566)),
           ),
           const SizedBox(height: 8),
-          Container(
+          Align(
             alignment: Alignment.center,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
@@ -55,9 +56,9 @@ class AboutScreen extends StatelessWidget {
                 color: const Color(0xFFF0F3F8),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Text(
-                strings.get('version'),
-                style: const TextStyle(color: AppTheme.muted, fontWeight: FontWeight.w700),
+              child: const Text(
+                'v1.0.0',
+                style: TextStyle(color: AppTheme.muted, fontWeight: FontWeight.w700),
               ),
             ),
           ),
@@ -71,13 +72,41 @@ class AboutScreen extends StatelessWidget {
             ),
             child: Column(
               children: [
-                _AboutTile(icon: Icons.privacy_tip_outlined, title: strings.get('privacyPolicy')),
+                _AboutTile(
+                  key: const Key('about-privacy'),
+                  icon: Icons.privacy_tip_outlined,
+                  title: strings.get('privacyPolicy'),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => PrivacyPolicyScreen(controller: controller)),
+                  ),
+                ),
                 const Divider(height: 1, indent: 68),
-                _AboutTile(icon: Icons.code_rounded, title: strings.get('openSourceLicenses')),
+                _AboutTile(
+                  key: const Key('about-licenses'),
+                  icon: Icons.code_rounded,
+                  title: strings.get('openSourceLicenses'),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => OpenSourceLicensesScreen(controller: controller)),
+                  ),
+                ),
                 const Divider(height: 1, indent: 68),
-                _AboutTile(icon: Icons.help_outline_rounded, title: strings.get('howItWorks')),
+                _AboutTile(
+                  key: const Key('about-how-it-works'),
+                  icon: Icons.help_outline_rounded,
+                  title: strings.get('howItWorks'),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => HowItWorksScreen(controller: controller)),
+                  ),
+                ),
                 const Divider(height: 1, indent: 68),
-                _AboutTile(icon: Icons.mail_outline_rounded, title: strings.get('contact')),
+                _AboutTile(
+                  key: const Key('about-contact'),
+                  icon: Icons.mail_outline_rounded,
+                  title: strings.get('contact'),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => ContactScreen(controller: controller)),
+                  ),
+                ),
               ],
             ),
           ),
@@ -100,10 +129,11 @@ class AboutScreen extends StatelessWidget {
 }
 
 class _AboutTile extends StatelessWidget {
-  const _AboutTile({required this.icon, required this.title});
+  const _AboutTile({super.key, required this.icon, required this.title, required this.onTap});
 
   final IconData icon;
   final String title;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -118,7 +148,7 @@ class _AboutTile extends StatelessWidget {
       ),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
       trailing: const Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
-      onTap: () {},
+      onTap: onTap,
     );
   }
 }

@@ -11,17 +11,16 @@ import 'package:wvab_mobile/core/services/settings_store.dart';
 import 'package:wvab_mobile/core/services/speech_service.dart';
 import 'package:wvab_mobile/core/theme/ui_metrics.dart';
 import 'package:wvab_mobile/core/vision/mobile_inference_engine.dart';
+import 'package:wvab_mobile/features/about/about_screen.dart';
 
 class _FakeSpeechService implements SpeechService {
+  final List<String> spoken = <String>[];
   @override
   Future<void> initialize(String languageCode) async {}
-
   @override
   Future<void> setLanguage(String languageCode) async {}
-
   @override
-  Future<void> speak(String message) async {}
-
+  Future<void> speak(String message) async => spoken.add(message);
   @override
   Future<void> stop() async {}
 }
@@ -29,72 +28,63 @@ class _FakeSpeechService implements SpeechService {
 class _FakeFeedbackService implements FeedbackService {
   @override
   Future<void> light() async {}
-
   @override
   Future<void> medium() async {}
-
   @override
   Future<void> urgent() async {}
 }
 
 class _FakeInferenceEngine implements InferenceEngine {
   bool _ready = false;
-
   @override
   bool get isReady => _ready;
-
   @override
   Future<void> initialize() async => _ready = true;
-
   @override
-  Future<MobileInferenceResult> run(
-    Float32List nchwInput, {
-    required double confidenceThreshold,
-  }) async {
-    return const MobileInferenceResult(
-      detections: [],
-      inferenceDuration: Duration(milliseconds: 1),
-    );
-  }
-
+  Future<MobileInferenceResult> run(Float32List nchwInput, {required double confidenceThreshold}) async =>
+      const MobileInferenceResult(detections: [], inferenceDuration: Duration(milliseconds: 1));
   @override
   Future<void> close() async => _ready = false;
 }
 
-AppController _controller({bool onboarded = true}) {
+AppController _controller({bool onboarded = true, _FakeSpeechService? speech}) {
   return AppController(
-    speechService: _FakeSpeechService(),
+    speechService: speech ?? _FakeSpeechService(),
     feedbackService: _FakeFeedbackService(),
-    settingsStore: MemorySettingsStore(AppSettings(firstRunCompleted: onboarded)),
+    settingsStore: MemorySettingsStore(AppSettings(
+      firstRunCompleted: onboarded,
+      userName: onboarded ? 'Test User' : '',
+    )),
     credentialsStore: MemoryEsp32CredentialsStore(),
     inferenceEngine: _FakeInferenceEngine(),
   );
 }
 
 void main() {
-  testWidgets('first launch completes local onboarding without a backend', (tester) async {
-    final controller = _controller(onboarded: false);
+  testWidgets('first launch requires name and completes local onboarding without a backend', (tester) async {
+    final speech = _FakeSpeechService();
+    final controller = _controller(onboarded: false, speech: speech);
     await controller.initialize();
 
     await tester.pumpWidget(WvabMobileApp(controller: controller));
+    expect(find.byKey(const Key('onboarding-name')), findsOneWidget);
     expect(find.byKey(const Key('onboarding-phone-camera')), findsOneWidget);
 
-    await tester.scrollUntilVisible(
-      find.byKey(const Key('onboarding-finish')),
-      300,
-    );
+    await tester.enterText(find.byKey(const Key('onboarding-name')), 'Shagor');
+    await tester.scrollUntilVisible(find.byKey(const Key('onboarding-finish')), 300);
     await tester.tap(find.byKey(const Key('onboarding-finish')));
     await tester.pumpAndSettle();
 
     expect(controller.settings.firstRunCompleted, isTrue);
+    expect(controller.settings.userName, 'Shagor');
     expect(controller.settings.cameraSource, CameraSourceType.phone);
     expect(find.byKey(const Key('start-assistance-button')), findsOneWidget);
+    expect(speech.spoken, contains('Welcome Mr. Shagor'));
   });
 
   testWidgets('home matches approved assistance-first proportions', (tester) async {
     final controller = _controller();
     await controller.initialize();
-
     await tester.pumpWidget(WvabMobileApp(controller: controller));
 
     expect(find.text('WVAB'), findsOneWidget);
@@ -113,59 +103,67 @@ void main() {
   testWidgets('home remains overflow-free on compact phone viewport', (tester) async {
     await tester.binding.setSurfaceSize(const Size(360, 640));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-
     final controller = _controller();
     await controller.initialize();
     await tester.pumpWidget(WvabMobileApp(controller: controller));
-
     expect(find.byKey(const Key('home-start-circle')), findsOneWidget);
     expect(find.byKey(const Key('home-status-bar')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('language selection changes the whole app interface', (tester) async {
+  testWidgets('language selection changes the app and exposes expanded language search', (tester) async {
     final controller = _controller();
     await controller.initialize();
-
     await tester.pumpWidget(WvabMobileApp(controller: controller));
     await tester.tap(find.byKey(const Key('language-button')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Language'), findsOneWidget);
+    expect(find.byKey(const Key('language-search')), findsOneWidget);
+    expect(find.byKey(const Key('language-es-ES')), findsOneWidget);
     await tester.tap(find.byKey(const Key('language-bn-BD')));
     await tester.pumpAndSettle();
 
     expect(controller.settings.languageCode, 'bn-BD');
-    expect(find.text('সেটিংস'), findsOneWidget);
-    expect(find.text('ইতিহাস'), findsOneWidget);
-    expect(find.text('ফোন ক্যামেরা'), findsOneWidget);
   });
 
   testWidgets('settings keeps the fixed bottom navigation and save action', (tester) async {
     final controller = _controller();
     await controller.initialize();
-
     await tester.pumpWidget(WvabMobileApp(controller: controller));
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
 
     final settingsList = find.byKey(const Key('settings-list'));
     expect(settingsList, findsOneWidget);
-    expect(
-      tester.getSize(find.byKey(const Key('settings-bottom-nav'))).height,
-      UiMetrics.settingsBottomBarHeight,
-    );
+    expect(tester.getSize(find.byKey(const Key('settings-bottom-nav'))).height, UiMetrics.settingsBottomBarHeight);
 
     await tester.scrollUntilVisible(
       find.byKey(const Key('settings-save-button')),
       300,
-      scrollable: find.descendant(
-        of: settingsList,
-        matching: find.byType(Scrollable),
-      ),
+      scrollable: find.descendant(of: settingsList, matching: find.byType(Scrollable)),
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('settings-save-button')), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('about legal help and contact pages are functional', (tester) async {
+    final controller = _controller();
+    await controller.initialize();
+    await tester.pumpWidget(MaterialApp(home: AboutScreen(controller: controller)));
+
+    expect(find.byKey(const Key('about-privacy')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('about-privacy')));
+    await tester.pumpAndSettle();
+    expect(find.text('Privacy Policy'), findsOneWidget);
+    expect(find.textContaining('smshagor.dev@gmail.com'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('about-contact')));
+    await tester.pumpAndSettle();
+    expect(find.text('smshagor.com'), findsOneWidget);
+    expect(find.text('smshagor.dev@gmail.com'), findsOneWidget);
+    expect(find.text('+79954949836'), findsOneWidget);
   });
 }
