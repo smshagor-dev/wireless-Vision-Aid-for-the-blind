@@ -12,6 +12,7 @@ class SharedPreferencesSettingsStore implements SettingsStore {
       : _preferences = preferences ?? SharedPreferencesAsync();
 
   static const _prefix = 'wvab.';
+  static const _detectionSchemaVersion = 2;
   final SharedPreferencesAsync _preferences;
 
   @override
@@ -19,6 +20,14 @@ class SharedPreferencesSettingsStore implements SettingsStore {
     final language = await _preferences.getString('${_prefix}language');
     final source = await _preferences.getString('${_prefix}camera_source');
     final classes = await _preferences.getStringList('${_prefix}detected_classes');
+    final detectionSchema = await _preferences.getInt('${_prefix}detection_schema_version') ?? 1;
+
+    final detectedClasses = detectionSchema < _detectionSchemaVersion
+        ? allCocoDetectedClasses
+        : (classes == null
+            ? allCocoDetectedClasses
+            : classes.where(allCocoDetectedClasses.contains).toSet());
+
     return AppSettings(
       firstRunCompleted: await _preferences.getBool('${_prefix}first_run_completed') ?? false,
       languageCode: language ?? 'en-US',
@@ -28,7 +37,7 @@ class SharedPreferencesSettingsStore implements SettingsStore {
       esp32ListenPort: await _preferences.getInt('${_prefix}esp32_listen_port') ?? 9999,
       autoReconnect: await _preferences.getBool('${_prefix}auto_reconnect') ?? true,
       detectionConfidence: await _preferences.getDouble('${_prefix}detection_confidence') ?? 0.50,
-      detectedClasses: classes == null ? const AppSettings().detectedClasses : classes.toSet(),
+      detectedClasses: detectedClasses,
     );
   }
 
@@ -42,6 +51,7 @@ class SharedPreferencesSettingsStore implements SettingsStore {
     await _preferences.setInt('${_prefix}esp32_listen_port', settings.esp32ListenPort);
     await _preferences.setBool('${_prefix}auto_reconnect', settings.autoReconnect);
     await _preferences.setDouble('${_prefix}detection_confidence', settings.detectionConfidence);
+    await _preferences.setInt('${_prefix}detection_schema_version', _detectionSchemaVersion);
     await _preferences.setStringList(
       '${_prefix}detected_classes',
       settings.detectedClasses.toList()..sort(),
