@@ -265,12 +265,6 @@ class AppController extends ChangeNotifier {
   String focusedGuidanceText(GuidanceEvent event) =>
       labelLocalizer.focusedGuidanceMessage(event, _settings.languageCode);
 
-  String focusedDistanceText(GuidanceEvent event) =>
-      labelLocalizer.distanceDisplay(event.distanceBand, _settings.languageCode);
-
-  String focusedRouteText(GuidanceEvent event) =>
-      labelLocalizer.travelAdviceShort(event.travelAdvice, _settings.languageCode);
-
   Future<void> clearHistory() async {
     _history = <DetectionHistoryEntry>[];
     _lastHistoryCapture.clear();
@@ -327,7 +321,7 @@ class AppController extends ChangeNotifier {
     try {
       await announce(
         labelLocalizer.focusedGuidanceMessage(event, _settings.languageCode),
-        urgent: event.urgent || event.travelAdvice == TravelAdvice.stop,
+        urgent: event.urgent,
       );
     } finally {
       _guidanceSpeechBusy = false;
