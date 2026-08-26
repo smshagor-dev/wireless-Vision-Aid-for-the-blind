@@ -1,7 +1,7 @@
 name: wvab_mobile
 description: Standalone offline Android runtime for Wireless Vision-Aid for the Blind.
 publish_to: "none"
-version: 1.0.0+6
+version: 1.0.1+7
 
 environment:
   sdk: ">=3.11.0 <4.0.0"
