@@ -8,6 +8,7 @@ import 'package:wvab_mobile/core/services/esp32_credentials_store.dart';
 import 'package:wvab_mobile/core/services/feedback_service.dart';
 import 'package:wvab_mobile/core/services/settings_store.dart';
 import 'package:wvab_mobile/core/services/speech_service.dart';
+import 'package:wvab_mobile/core/vision/detection.dart';
 import 'package:wvab_mobile/core/vision/mobile_inference_engine.dart';
 
 class _ThrowingSettingsStore implements SettingsStore {
@@ -43,6 +44,23 @@ class _ThrowingSpeechService implements SpeechService {
   Future<void> stop() async => throw StateError('tts unavailable');
 }
 
+class _RecordingSpeechService implements SpeechService {
+  final List<String> spoken = <String>[];
+  String? initializedLanguage;
+
+  @override
+  Future<void> initialize(String languageCode) async => initializedLanguage = languageCode;
+
+  @override
+  Future<void> setLanguage(String languageCode) async => initializedLanguage = languageCode;
+
+  @override
+  Future<void> speak(String message) async => spoken.add(message);
+
+  @override
+  Future<void> stop() async {}
+}
+
 class _ThrowingFeedbackService implements FeedbackService {
   @override
   Future<void> light() async => throw StateError('haptics unavailable');
@@ -52,6 +70,17 @@ class _ThrowingFeedbackService implements FeedbackService {
 
   @override
   Future<void> urgent() async => throw StateError('haptics unavailable');
+}
+
+class _NoopFeedbackService implements FeedbackService {
+  @override
+  Future<void> light() async {}
+
+  @override
+  Future<void> medium() async {}
+
+  @override
+  Future<void> urgent() async {}
 }
 
 class _DelayedInferenceEngine implements InferenceEngine {
@@ -84,6 +113,39 @@ class _DelayedInferenceEngine implements InferenceEngine {
   Future<void> close() async => _ready = false;
 }
 
+class _ImmediateInferenceEngine implements InferenceEngine {
+  bool _ready = false;
+  double? threshold;
+
+  @override
+  bool get isReady => _ready;
+
+  @override
+  Future<void> initialize() async => _ready = true;
+
+  @override
+  Future<MobileInferenceResult> run(
+    Float32List nchwInput, {
+    required double confidenceThreshold,
+  }) async {
+    threshold = confidenceThreshold;
+    return const MobileInferenceResult(
+      detections: [
+        Detection(
+          classId: 0,
+          label: 'person',
+          confidence: 0.82,
+          box: BoundingBox(left: 0.2, top: 0.1, right: 0.8, bottom: 0.9),
+        ),
+      ],
+      inferenceDuration: Duration(milliseconds: 5),
+    );
+  }
+
+  @override
+  Future<void> close() async => _ready = false;
+}
+
 AppController _controller(_DelayedInferenceEngine inference) {
   return AppController(
     speechService: _ThrowingSpeechService(),
@@ -101,6 +163,7 @@ void main() {
 
     await expectLater(controller.initialize(), completes);
     expect(controller.settings.detectedClasses, allCocoDetectedClasses);
+    expect(controller.settings.detectionConfidence, 0.25);
     expect(controller.esp32Credentials, isNull);
   });
 
@@ -121,5 +184,27 @@ void main() {
     expect(inference.initializeCalls, 1);
     expect(controller.runtimeState, LocalRuntimeState.ready);
     expect(inference.isReady, isTrue);
+  });
+
+  test('detected hazard reaches voice guidance at the v1.0.0 mobile threshold', () async {
+    final inference = _ImmediateInferenceEngine();
+    final speech = _RecordingSpeechService();
+    final controller = AppController(
+      speechService: speech,
+      feedbackService: _NoopFeedbackService(),
+      settingsStore: MemorySettingsStore(const AppSettings(vibrationEnabled: false)),
+      credentialsStore: MemoryEsp32CredentialsStore(),
+      inferenceEngine: inference,
+    );
+
+    await controller.initialize();
+    final result = await controller.processTensor(Float32List(3 * 320 * 320));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(inference.threshold, 0.25);
+    expect(result.detections, hasLength(1));
+    expect(result.detections.single.label, 'person');
+    expect(speech.spoken, hasLength(1));
+    expect(speech.spoken.single, isNotEmpty);
   });
 }
