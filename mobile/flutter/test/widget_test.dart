@@ -75,10 +75,19 @@ void main() {
     expect(find.byKey(const Key('onboarding-name')), findsOneWidget);
     await tester.enterText(find.byKey(const Key('onboarding-name')), 'Shagor');
 
-    await tester.scrollUntilVisible(find.byKey(const Key('onboarding-phone-camera')), 250);
+    final onboardingScroll = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('onboarding-phone-camera')),
+      250,
+      scrollable: onboardingScroll,
+    );
     expect(find.byKey(const Key('onboarding-phone-camera')), findsOneWidget);
 
-    await tester.scrollUntilVisible(find.byKey(const Key('onboarding-finish')), 300);
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('onboarding-finish')),
+      300,
+      scrollable: onboardingScroll,
+    );
     await tester.tap(find.byKey(const Key('onboarding-finish')));
     await _pumpNavigation(tester);
 
