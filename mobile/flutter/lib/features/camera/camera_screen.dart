@@ -25,19 +25,27 @@ class CameraScreen extends StatefulWidget {
 }
 
 class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver {
-  static const _minimumInferenceInterval = Duration(milliseconds: 180);
+  static const _minimumInferenceInterval = Duration(milliseconds: 300);
+  static const _previewSettleDelay = Duration(milliseconds: 120);
 
   final _phonePreprocessor = const CameraTensorPreprocessor(inputSize: 320);
   final _jpegPreprocessor = const JpegTensorPreprocessor(inputSize: 320);
+
   CameraController? _cameraController;
   Esp32FrameReceiver? _esp32Receiver;
   StreamSubscription<Uint8List>? _esp32FrameSubscription;
   StreamSubscription<Esp32ReceiverStats>? _esp32StatsSubscription;
+  Future<void> _sourceTransition = Future<void>.value();
+
   Uint8List? _latestEsp32Jpeg;
   DateTime? _lastInferenceStarted;
   Duration? _lastInferenceDuration;
   List<Detection> _detections = const [];
   String? _error;
+
+  int _sourceGeneration = 0;
+  bool _wantSourceRunning = false;
+  bool _disposed = false;
   bool _initializing = true;
   bool _processingFrame = false;
   bool _paused = false;
@@ -50,19 +58,51 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    unawaited(_startSelectedSource());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _requestSourceStart();
+    });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
-      unawaited(_stopSources());
-    } else if (state == AppLifecycleState.resumed) {
-      unawaited(_startSelectedSource());
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _requestSourceStart();
+        break;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        _requestSourceStop();
+        break;
     }
   }
 
-  Future<void> _startSelectedSource() async {
+  void _requestSourceStart() {
+    if (_disposed) return;
+    _wantSourceRunning = true;
+    final generation = ++_sourceGeneration;
+    _enqueueSourceTransition(() => _startSelectedSource(generation));
+  }
+
+  void _requestSourceStop() {
+    _wantSourceRunning = false;
+    ++_sourceGeneration;
+    _enqueueSourceTransition(_stopSourcesInternal);
+  }
+
+  void _enqueueSourceTransition(Future<void> Function() operation) {
+    final next = _sourceTransition.then((_) => operation());
+    _sourceTransition = next.catchError((Object error, StackTrace stackTrace) {
+      debugPrint('WVAB camera transition failed: $error\n$stackTrace');
+    });
+  }
+
+  bool _isCurrentSource(int generation) {
+    return mounted && !_disposed && _wantSourceRunning && generation == _sourceGeneration;
+  }
+
+  void _resetViewForStart() {
     if (!mounted) return;
     setState(() {
       _initializing = true;
@@ -74,22 +114,40 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       _detections = const [];
       _lastInferenceDuration = null;
     });
+  }
+
+  Future<void> _startSelectedSource(int generation) async {
+    if (!_isCurrentSource(generation)) return;
+    await _stopSourcesInternal();
+    if (!_isCurrentSource(generation)) return;
+
+    _resetViewForStart();
     try {
-      await widget.controller.ensureInferenceReady();
       if (_usingPhone) {
-        await _startPhoneCamera();
+        await _startPhoneCamera(generation);
       } else {
-        await _startEsp32Receiver();
+        await _startEsp32Receiver(generation);
       }
-      if (mounted) setState(() => _initializing = false);
-    } catch (error) {
-      await _stopSources();
-      if (!mounted) return;
+    } catch (error, stackTrace) {
+      debugPrint('WVAB source startup failed: $error\n$stackTrace');
+      await _stopSourcesInternal();
+      if (!_isCurrentSource(generation)) return;
       setState(() {
         _initializing = false;
-        _error = error.toString();
+        _error = _friendlyCameraError(error);
       });
     }
+  }
+
+  String _friendlyCameraError(Object error) {
+    if (error is CameraException) {
+      return switch (error.code) {
+        'CameraAccessDenied' => 'Camera permission was denied. Allow camera access and retry.',
+        'CameraAccessDeniedWithoutPrompt' => 'Camera access is disabled. Enable it in Android settings and retry.',
+        _ => error.description ?? error.code,
+      };
+    }
+    return error.toString();
   }
 
   CameraDescription _selectCamera(List<CameraDescription> cameras) {
@@ -99,9 +157,13 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     return cameras.first;
   }
 
-  Future<void> _startPhoneCamera() async {
+  Future<void> _startPhoneCamera(int generation) async {
     final cameras = await availableCameras();
-    if (cameras.isEmpty) throw CameraException('noCamera', 'No camera is available on this device.');
+    if (!_isCurrentSource(generation)) return;
+    if (cameras.isEmpty) {
+      throw CameraException('noCamera', 'No camera is available on this device.');
+    }
+
     final description = _selectCamera(cameras);
     final controller = CameraController(
       description,
@@ -109,40 +171,82 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.yuv420,
     );
-    await controller.initialize();
-    if (!mounted) {
-      await controller.dispose();
-      return;
+
+    try {
+      await controller.initialize();
+      if (!_isCurrentSource(generation)) {
+        await _safeDisposeCamera(controller);
+        return;
+      }
+
+      _cameraController = controller;
+      if (mounted) {
+        setState(() {
+          _initializing = false;
+          _error = null;
+        });
+      }
+
+      await Future<void>.delayed(_previewSettleDelay);
+      if (!_isCurrentSource(generation) || !identical(_cameraController, controller)) {
+        if (!identical(_cameraController, controller)) {
+          await _safeDisposeCamera(controller);
+        }
+        return;
+      }
+
+      // Initialize native inference only after the camera preview is stable. This
+      // keeps camera permission/lifecycle transitions independent from ONNX setup.
+      await widget.controller.ensureInferenceReady();
+      if (!_isCurrentSource(generation) || !identical(_cameraController, controller)) return;
+
+      await controller.startImageStream((image) {
+        if (!_isCurrentSource(generation) || _paused) return;
+        unawaited(_processPhoneFrame(image, description.sensorOrientation, generation));
+      });
+    } catch (_) {
+      if (identical(_cameraController, controller)) _cameraController = null;
+      await _safeDisposeCamera(controller);
+      rethrow;
     }
-    _cameraController = controller;
-    await controller.startImageStream((image) {
-      unawaited(_processPhoneFrame(image, description.sensorOrientation));
-    });
   }
 
-  Future<void> _startEsp32Receiver() async {
+  Future<void> _startEsp32Receiver(int generation) async {
     final credentials = widget.controller.esp32Credentials;
     if (credentials == null || !credentials.isConfigured) {
       throw FormatException(widget.controller.standaloneStrings.get('pairingRequired'));
     }
+
     final receiver = Esp32FrameReceiver(
       credentials: credentials,
       port: widget.controller.settings.esp32ListenPort,
       replayStore: SharedPreferencesUdpReplayStore(),
     );
+
+    await receiver.start();
+    if (!_isCurrentSource(generation)) {
+      await receiver.dispose();
+      return;
+    }
+
     _esp32Receiver = receiver;
     _esp32FrameSubscription = receiver.frames.listen((jpeg) {
+      if (!_isCurrentSource(generation)) return;
       if (!_paused && mounted) setState(() => _latestEsp32Jpeg = jpeg);
-      unawaited(_processEsp32Frame(jpeg));
+      unawaited(_processEsp32Frame(jpeg, generation));
     });
     _esp32StatsSubscription = receiver.stats.listen((stats) {
-      if (mounted) setState(() => _esp32Authenticated = stats.authenticated);
+      if (_isCurrentSource(generation) && mounted) {
+        setState(() => _esp32Authenticated = stats.authenticated);
+      }
     });
-    await receiver.start();
+
+    if (mounted) setState(() => _initializing = false);
+    await widget.controller.ensureInferenceReady();
   }
 
-  bool _canProcessFrame() {
-    if (_paused || _processingFrame) return false;
+  bool _canProcessFrame(int generation) {
+    if (!_isCurrentSource(generation) || _paused || _processingFrame) return false;
     final now = DateTime.now();
     final previous = _lastInferenceStarted;
     if (previous != null && now.difference(previous) < _minimumInferenceInterval) return false;
@@ -151,36 +255,38 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     return true;
   }
 
-  Future<void> _processPhoneFrame(CameraImage image, int rotationDegrees) async {
-    if (!_canProcessFrame()) return;
+  Future<void> _processPhoneFrame(CameraImage image, int rotationDegrees, int generation) async {
+    if (!_canProcessFrame(generation)) return;
     try {
       final prepared = _phonePreprocessor.preprocess(image, rotationDegrees: rotationDegrees);
-      await _runInference(prepared);
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      await _runInference(prepared, generation);
+    } catch (error, stackTrace) {
+      debugPrint('WVAB phone-frame processing failed: $error\n$stackTrace');
+      if (_isCurrentSource(generation) && mounted) setState(() => _error = error.toString());
     } finally {
       _processingFrame = false;
     }
   }
 
-  Future<void> _processEsp32Frame(Uint8List jpeg) async {
-    if (!_canProcessFrame()) return;
+  Future<void> _processEsp32Frame(Uint8List jpeg, int generation) async {
+    if (!_canProcessFrame(generation)) return;
     try {
       final prepared = _jpegPreprocessor.preprocess(jpeg);
-      await _runInference(prepared);
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      await _runInference(prepared, generation);
+    } catch (error, stackTrace) {
+      debugPrint('WVAB ESP32-frame processing failed: $error\n$stackTrace');
+      if (_isCurrentSource(generation) && mounted) setState(() => _error = error.toString());
     } finally {
       _processingFrame = false;
     }
   }
 
-  Future<void> _runInference(PreparedVisionInput prepared) async {
+  Future<void> _runInference(PreparedVisionInput prepared, int generation) async {
     final result = await widget.controller.processTensor(
       prepared.tensor,
       transform: prepared.transform,
     );
-    if (!mounted) return;
+    if (!_isCurrentSource(generation) || !mounted) return;
     setState(() {
       _detections = result.detections;
       _lastInferenceDuration = result.inferenceDuration;
@@ -189,66 +295,104 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }
 
   Future<void> _togglePause() async {
+    if (_disposed) return;
     final nextPaused = !_paused;
     final camera = _cameraController;
+    final generation = _sourceGeneration;
     try {
-      if (_usingPhone && camera != null && camera.value.isInitialized) {
+      if (_usingPhone && camera != null && _isCurrentSource(generation)) {
         if (nextPaused) {
           if (camera.value.isStreamingImages) await camera.stopImageStream();
-          await camera.pausePreview();
+          if (_isCurrentSource(generation)) await camera.pausePreview();
         } else {
           await camera.resumePreview();
-          if (!camera.value.isStreamingImages) {
+          if (_isCurrentSource(generation) && !camera.value.isStreamingImages) {
             final rotation = camera.description.sensorOrientation;
-            await camera.startImageStream((image) => unawaited(_processPhoneFrame(image, rotation)));
+            await camera.startImageStream((image) {
+              if (!_isCurrentSource(generation) || _paused) return;
+              unawaited(_processPhoneFrame(image, rotation, generation));
+            });
           }
         }
       }
-      if (mounted) setState(() => _paused = nextPaused);
+      if (mounted && _isCurrentSource(generation)) setState(() => _paused = nextPaused);
     } on CameraException catch (error) {
-      if (mounted) setState(() => _error = error.description ?? error.code);
+      if (mounted && _isCurrentSource(generation)) {
+        setState(() => _error = error.description ?? error.code);
+      }
     }
   }
 
   Future<void> _toggleTorch() async {
-    if (!_usingPhone) return;
+    if (!_usingPhone || _disposed) return;
     final camera = _cameraController;
-    if (camera == null || !camera.value.isInitialized) return;
+    final generation = _sourceGeneration;
+    if (camera == null || !_isCurrentSource(generation)) return;
     try {
       final next = !_torchOn;
       await camera.setFlashMode(next ? FlashMode.torch : FlashMode.off);
-      if (mounted) setState(() => _torchOn = next);
+      if (mounted && _isCurrentSource(generation)) setState(() => _torchOn = next);
     } on CameraException {
-      if (!mounted) return;
+      if (!mounted || !_isCurrentSource(generation)) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(widget.controller.strings.get('flashUnavailable'))),
       );
     }
   }
 
-  Future<void> _stopSources() async {
+  Future<void> _safeDisposeCamera(CameraController camera) async {
+    try {
+      if (camera.value.isStreamingImages) await camera.stopImageStream();
+    } catch (_) {}
+    try {
+      await camera.dispose();
+    } catch (error, stackTrace) {
+      debugPrint('WVAB camera dispose failed: $error\n$stackTrace');
+    }
+  }
+
+  Future<void> _stopSourcesInternal() async {
+    _processingFrame = false;
+
     final camera = _cameraController;
     _cameraController = null;
-    if (camera != null) {
-      try {
-        if (camera.value.isStreamingImages) await camera.stopImageStream();
-      } catch (_) {}
-      await camera.dispose();
-    }
-    await _esp32FrameSubscription?.cancel();
+    if (camera != null) await _safeDisposeCamera(camera);
+
+    final frameSubscription = _esp32FrameSubscription;
     _esp32FrameSubscription = null;
-    await _esp32StatsSubscription?.cancel();
+    if (frameSubscription != null) {
+      try {
+        await frameSubscription.cancel();
+      } catch (_) {}
+    }
+
+    final statsSubscription = _esp32StatsSubscription;
     _esp32StatsSubscription = null;
+    if (statsSubscription != null) {
+      try {
+        await statsSubscription.cancel();
+      } catch (_) {}
+    }
+
     final receiver = _esp32Receiver;
     _esp32Receiver = null;
-    if (receiver != null) await receiver.dispose();
+    if (receiver != null) {
+      try {
+        await receiver.dispose();
+      } catch (error, stackTrace) {
+        debugPrint('WVAB ESP32 receiver dispose failed: $error\n$stackTrace');
+      }
+    }
   }
 
   @override
   void dispose() {
+    _disposed = true;
+    _wantSourceRunning = false;
+    ++_sourceGeneration;
     WidgetsBinding.instance.removeObserver(this);
     unawaited(widget.controller.stopFeedback());
-    unawaited(_stopSources());
+    _enqueueSourceTransition(_stopSourcesInternal);
     super.dispose();
   }
 
@@ -443,7 +587,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
             ),
             const SizedBox(height: 18),
             OutlinedButton(
-              onPressed: _startSelectedSource,
+              onPressed: _requestSourceStart,
               style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
               child: const Text('Retry'),
             ),

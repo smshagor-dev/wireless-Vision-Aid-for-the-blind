@@ -38,32 +38,22 @@ class OnnxMobileInferenceEngine implements InferenceEngine {
   @override
   Future<void> initialize() async {
     if (_session != null) return;
-    final available = await _runtime.getAvailableProviders();
-    final providers = <OrtProvider>[
-      if (available.contains(OrtProvider.XNNPACK)) OrtProvider.XNNPACK,
-      OrtProvider.CPU,
-    ];
-    try {
-      _session = await _runtime.createSessionFromAsset(
-        assetPath,
-        options: OrtSessionOptions(
-          providers: providers,
-          intraOpNumThreads: 2,
-          interOpNumThreads: 1,
-          useArena: true,
-        ),
-      );
-    } catch (_) {
-      _session = await _runtime.createSessionFromAsset(
-        assetPath,
-        options: OrtSessionOptions(
-          providers: const [OrtProvider.CPU],
-          intraOpNumThreads: 2,
-          interOpNumThreads: 1,
-          useArena: true,
-        ),
-      );
-    }
+
+    // Stability is more important than provider-specific acceleration here.
+    // A native execution-provider fault can terminate the Android process and
+    // cannot be recovered by Dart try/catch. CPU keeps behavior predictable
+    // across devices; acceleration can be reintroduced only after device-level
+    // validation on the supported hardware matrix.
+    _session = await _runtime.createSessionFromAsset(
+      assetPath,
+      options: OrtSessionOptions(
+        providers: const [OrtProvider.CPU],
+        intraOpNumThreads: 2,
+        interOpNumThreads: 1,
+        useArena: true,
+      ),
+    );
+
     if (_session!.inputNames.isEmpty || _session!.outputNames.isEmpty) {
       await close();
       throw StateError('WVAB ONNX model has no usable inputs or outputs.');
