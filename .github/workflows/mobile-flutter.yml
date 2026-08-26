@@ -16,11 +16,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: mobile-flutter-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   flutter-mobile:
@@ -143,3 +143,44 @@ jobs:
           path: mobile/flutter/build/app/outputs/flutter-apk/*-release.apk
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish WVAB v1.0.1 camera-stability demo
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.actor != 'github-actions[bot]'
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'version: 1.0.1+7' pubspec.yaml >/dev/null || { echo 'Not the v1.0.1+7 build; skipping repository demo publish.'; exit 0; }
+          target="demo/wvab-mobile-demo-arm64-v8a.apk"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "$target"
+          sha256sum "$target" | sed 's#  demo/#  #' > demo/SHA256SUMS.txt
+          cat > demo/README.md <<'EOF'
+          # WVAB Mobile v1.0.1 Camera-Stability Demo APK
+
+          `wvab-mobile-demo-arm64-v8a.apk` is the WVAB Mobile **v1.0.1** Android release demo for 64-bit ARM devices.
+
+          - App version: 1.0.1 (build 7)
+          - Camera lifecycle start/stop operations are serialized.
+          - Stale camera permission/initialization sessions are invalidated before they can reuse disposed controllers.
+          - Camera preview is established before ONNX inference initialization begins.
+          - ONNX Runtime uses the CPU provider for device-stable native execution.
+          - Camera and ESP32 teardown is defensive and idempotent.
+          - Inference is throttled to reduce camera/native runtime pressure.
+          - All 80 COCO classes supported by the bundled YOLOv8n model remain enabled by default.
+          - Current restored WVAB launcher branding is retained.
+          - Build type: optimized Flutter release APK.
+          - ABI: arm64-v8a.
+          - Minimum Android SDK: 24.
+
+          This build specifically addresses the process crash observed when opening the phone camera.
+
+          Verify the APK against `SHA256SUMS.txt` after download.
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add demo/README.md demo/SHA256SUMS.txt "$target"
+          if git diff --cached --quiet; then
+            echo "v1.0.1 demo APK is already current."
+            exit 0
+          fi
+          git commit -m "Publish WVAB mobile v1.0.1 camera-stability demo [skip ci]"
+          git push origin HEAD:main
