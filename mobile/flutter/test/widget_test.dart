@@ -73,9 +73,11 @@ void main() {
 
     await tester.pumpWidget(WvabMobileApp(controller: controller));
     expect(find.byKey(const Key('onboarding-name')), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('onboarding-name')), 'Shagor');
+
+    await tester.scrollUntilVisible(find.byKey(const Key('onboarding-phone-camera')), 250);
     expect(find.byKey(const Key('onboarding-phone-camera')), findsOneWidget);
 
-    await tester.enterText(find.byKey(const Key('onboarding-name')), 'Shagor');
     await tester.scrollUntilVisible(find.byKey(const Key('onboarding-finish')), 300);
     await tester.tap(find.byKey(const Key('onboarding-finish')));
     await _pumpNavigation(tester);
