@@ -1,18 +1,20 @@
-# WVAB Mobile v1.0.0 Demo APK
+# WVAB Mobile v1.0.1 Camera-Stability Demo APK
 
-`wvab-mobile-demo-arm64-v8a.apk` is the WVAB Mobile **v1.0.0** Android release demo for 64-bit ARM devices.
+`wvab-mobile-demo-arm64-v8a.apk` is the WVAB Mobile **v1.0.1** Android release demo for 64-bit ARM devices.
 
-- App version: 1.0.0 (build 6)
-- Full model coverage: all 80 classes supported by the bundled YOLOv8n COCO model are enabled by default.
-- Existing installs migrate from the previous 11-class selection to the full 80-class detector set.
-- Startup failures from settings, keystore, TTS, or optional feedback are isolated instead of terminating the app.
-- Inference uses XNNPACK with CPU fallback for wider Android device stability.
-- TTS/haptics run outside the inference hot path so camera detection does not wait for speech completion.
-- Current restored WVAB launcher branding is used; the old deterministic launcher icon is blocked by CI.
+- App version: 1.0.1 (build 7)
+- Camera lifecycle start/stop operations are serialized.
+- Stale camera permission/initialization sessions are invalidated before they can reuse disposed controllers.
+- Camera preview is established before ONNX inference initialization begins.
+- ONNX Runtime uses the CPU provider for device-stable native execution.
+- Camera and ESP32 teardown is defensive and idempotent.
+- Inference is throttled to reduce camera/native runtime pressure.
+- All 80 COCO classes supported by the bundled YOLOv8n model remain enabled by default.
+- Current restored WVAB launcher branding is retained.
 - Build type: optimized Flutter release APK.
 - ABI: arm64-v8a.
 - Minimum Android SDK: 24.
 
-The bundled detector recognizes the 80 COCO classes it was trained for. Custom WVAB mobility classes such as curb, pothole, or stairs require an appropriately trained model.
+This build specifically addresses the process crash observed when opening the phone camera.
 
 Verify the APK against `SHA256SUMS.txt` after download.
