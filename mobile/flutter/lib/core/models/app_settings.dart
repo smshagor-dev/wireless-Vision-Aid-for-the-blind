@@ -117,7 +117,7 @@ class AppSettings {
     this.vibrationEnabled = true,
     this.esp32ListenPort = 9999,
     this.autoReconnect = true,
-    this.detectionConfidence = 0.50,
+    this.detectionConfidence = 0.25,
     this.detectedClasses = allCocoDetectedClasses,
   });
 
