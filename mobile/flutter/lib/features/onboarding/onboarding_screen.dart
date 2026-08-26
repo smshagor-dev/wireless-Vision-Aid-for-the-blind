@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/controllers/app_controller.dart';
-import '../../core/localization/app_strings.dart';
+import '../../core/localization/language_catalog.dart';
 import '../../core/localization/standalone_strings.dart';
 import '../../core/models/app_settings.dart';
 import '../../core/services/esp32_credentials_store.dart';
@@ -20,6 +20,7 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   late String _languageCode;
   late CameraSourceType _cameraSource;
+  late final TextEditingController _nameController;
   late final TextEditingController _portController;
   final _keyController = TextEditingController();
   final _tokenController = TextEditingController();
@@ -30,13 +31,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   void initState() {
     super.initState();
-    _languageCode = widget.controller.settings.languageCode;
+    _languageCode = LanguageCatalog.contains(widget.controller.settings.languageCode)
+        ? widget.controller.settings.languageCode
+        : 'en-US';
     _cameraSource = widget.controller.settings.cameraSource;
+    _nameController = TextEditingController(text: widget.controller.settings.userName);
     _portController = TextEditingController(text: widget.controller.settings.esp32ListenPort.toString());
   }
 
   @override
   void dispose() {
+    _nameController.dispose();
     _portController.dispose();
     _keyController.dispose();
     _tokenController.dispose();
@@ -47,7 +52,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (_saving) return;
     setState(() => _saving = true);
     try {
+      final name = _nameController.text.trim();
+      if (name.length < 2 || name.length > 80) {
+        throw const FormatException('Please enter your name (2–80 characters).');
+      }
+
       var settings = widget.controller.settings.copyWith(
+        userName: name,
         languageCode: _languageCode,
         cameraSource: _cameraSource,
       );
@@ -68,6 +79,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       }
       await widget.controller.updateSettings(settings);
       await widget.controller.completeOnboarding(
+        userName: name,
         languageCode: _languageCode,
         cameraSource: _cameraSource,
       );
@@ -113,26 +125,57 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               style: const TextStyle(fontSize: 16, height: 1.45, color: AppTheme.muted),
             ),
             const SizedBox(height: 28),
+            _SectionTitle(_nameTitle()),
+            const SizedBox(height: 10),
+            _Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: TextField(
+                  key: const Key('onboarding-name'),
+                  controller: _nameController,
+                  textCapitalization: TextCapitalization.words,
+                  maxLength: 80,
+                  autofillHints: const [AutofillHints.name],
+                  decoration: InputDecoration(
+                    labelText: _nameLabel(),
+                    hintText: 'Shagor',
+                    prefixIcon: const Icon(Icons.person_outline_rounded),
+                    helperText: _welcomeHint(),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
             _SectionTitle(strings.get('chooseLanguage')),
             const SizedBox(height: 10),
             _Card(
-              child: RadioGroup<String>(
-                groupValue: _languageCode,
-                onChanged: (value) {
-                  if (value != null) setState(() => _languageCode = value);
-                },
-                child: Column(
-                  children: AppStrings.supportedLanguages.entries.map((entry) {
-                    return RadioListTile<String>(
-                      key: Key('onboarding-language-${entry.key}'),
-                      value: entry.key,
-                      activeColor: AppTheme.blue,
-                      selected: entry.key == _languageCode,
-                      title: Text(entry.value, style: const TextStyle(fontWeight: FontWeight.w700)),
-                    );
-                  }).toList(),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    key: const Key('onboarding-language-dropdown'),
+                    value: _languageCode,
+                    isExpanded: true,
+                    menuMaxHeight: 420,
+                    items: LanguageCatalog.supported.entries
+                        .map((entry) => DropdownMenuItem<String>(
+                              value: entry.key,
+                              child: Text(entry.value, overflow: TextOverflow.ellipsis),
+                            ))
+                        .toList(growable: false),
+                    onChanged: (value) {
+                      if (value != null) setState(() => _languageCode = value);
+                    },
+                  ),
                 ),
               ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              LanguageCatalog.hasFullInterface(_languageCode)
+                  ? 'Interface and voice guidance use the selected language when the device TTS voice is installed.'
+                  : 'Voice uses the selected device language when available. WVAB interface text falls back to English for this locale.',
+              style: const TextStyle(color: AppTheme.muted, height: 1.35, fontSize: 13),
             ),
             const SizedBox(height: 24),
             _SectionTitle(strings.get('chooseCamera')),
@@ -157,32 +200,35 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             if (_cameraSource == CameraSourceType.esp32) ...[
               const SizedBox(height: 16),
               _Card(
-                child: Column(
-                  children: [
-                    TextField(
-                      key: const Key('onboarding-esp32-port'),
-                      controller: _portController,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(labelText: strings.get('esp32Port')),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      key: const Key('onboarding-esp32-key'),
-                      controller: _keyController,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      decoration: InputDecoration(labelText: strings.get('aesKey')),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      key: const Key('onboarding-esp32-token'),
-                      controller: _tokenController,
-                      obscureText: true,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      decoration: InputDecoration(labelText: strings.get('authToken')),
-                    ),
-                  ],
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      TextField(
+                        key: const Key('onboarding-esp32-port'),
+                        controller: _portController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(labelText: strings.get('esp32Port')),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('onboarding-esp32-key'),
+                        controller: _keyController,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        decoration: InputDecoration(labelText: strings.get('aesKey')),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('onboarding-esp32-token'),
+                        controller: _tokenController,
+                        obscureText: true,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        decoration: InputDecoration(labelText: strings.get('authToken')),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -204,11 +250,29 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       ),
     );
   }
+
+  String _nameTitle() => switch (_languageCode.split('-').first) {
+        'bn' => 'আপনার নাম',
+        'ru' => 'Ваше имя',
+        'hi' => 'आपका नाम',
+        'ar' => 'اسمك',
+        'es' => 'Tu nombre',
+        'fr' => 'Votre nom',
+        _ => 'Your name',
+      };
+
+  String _nameLabel() => _nameTitle();
+
+  String _welcomeHint() => switch (_languageCode.split('-').first) {
+        'bn' => 'পরবর্তীবার অ্যাপ খুললে নাম ধরে স্বাগত জানাবে।',
+        'ru' => 'При следующем запуске WVAB поприветствует вас по имени.',
+        'hi' => 'अगली बार ऐप खुलने पर WVAB नाम से स्वागत करेगा।',
+        _ => 'WVAB will welcome you by name on future app launches.',
+      };
 }
 
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle(this.text);
-
   final String text;
 
   @override
@@ -220,7 +284,6 @@ class _SectionTitle extends StatelessWidget {
 
 class _Card extends StatelessWidget {
   const _Card({required this.child});
-
   final Widget child;
 
   @override

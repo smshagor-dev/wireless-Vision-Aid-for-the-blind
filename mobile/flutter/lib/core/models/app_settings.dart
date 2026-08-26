@@ -111,6 +111,7 @@ const allCocoDetectedClasses = <String>{
 class AppSettings {
   const AppSettings({
     this.firstRunCompleted = false,
+    this.userName = '',
     this.languageCode = 'en-US',
     this.cameraSource = CameraSourceType.phone,
     this.speechEnabled = true,
@@ -122,6 +123,7 @@ class AppSettings {
   });
 
   final bool firstRunCompleted;
+  final String userName;
   final String languageCode;
   final CameraSourceType cameraSource;
   final bool speechEnabled;
@@ -133,6 +135,7 @@ class AppSettings {
 
   AppSettings copyWith({
     bool? firstRunCompleted,
+    String? userName,
     String? languageCode,
     CameraSourceType? cameraSource,
     bool? speechEnabled,
@@ -144,6 +147,7 @@ class AppSettings {
   }) {
     return AppSettings(
       firstRunCompleted: firstRunCompleted ?? this.firstRunCompleted,
+      userName: userName ?? this.userName,
       languageCode: languageCode ?? this.languageCode,
       cameraSource: cameraSource ?? this.cameraSource,
       speechEnabled: speechEnabled ?? this.speechEnabled,

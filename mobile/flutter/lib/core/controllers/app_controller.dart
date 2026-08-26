@@ -3,8 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../localization/app_strings.dart';
+import '../localization/detection_label_localizer.dart';
+import '../localization/language_catalog.dart';
 import '../localization/standalone_strings.dart';
 import '../models/app_settings.dart';
+import '../models/detection_history_entry.dart';
+import '../services/detection_history_store.dart';
 import '../services/esp32_credentials_store.dart';
 import '../services/feedback_service.dart';
 import '../services/settings_store.dart';
@@ -23,14 +27,20 @@ class AppController extends ChangeNotifier {
     required this.settingsStore,
     required this.credentialsStore,
     required this.inferenceEngine,
+    DetectionHistoryStore? historyStore,
+    DetectionLabelLocalizer? labelLocalizer,
     GuidanceEngine? guidanceEngine,
-  }) : guidanceEngine = guidanceEngine ?? GuidanceEngine();
+  })  : historyStore = historyStore ?? MemoryDetectionHistoryStore(),
+        labelLocalizer = labelLocalizer ?? DetectionLabelLocalizer(),
+        guidanceEngine = guidanceEngine ?? GuidanceEngine();
 
   final SpeechService speechService;
   final FeedbackService feedbackService;
   final SettingsStore settingsStore;
   final Esp32CredentialsStore credentialsStore;
   final InferenceEngine inferenceEngine;
+  final DetectionHistoryStore historyStore;
+  final DetectionLabelLocalizer labelLocalizer;
   final GuidanceEngine guidanceEngine;
 
   AppSettings _settings = const AppSettings();
@@ -40,6 +50,9 @@ class AppController extends ChangeNotifier {
   List<Detection> _lastDetections = const [];
   Duration? _lastInferenceDuration;
   Future<void>? _inferenceInitialization;
+  List<DetectionHistoryEntry> _history = <DetectionHistoryEntry>[];
+  Future<void> _historyWrite = Future<void>.value();
+  final Map<String, DateTime> _lastHistoryCapture = <String, DateTime>{};
 
   AppSettings get settings => _settings;
   AppStrings get strings => AppStrings(_settings.languageCode);
@@ -50,6 +63,7 @@ class AppController extends ChangeNotifier {
   String? get runtimeError => _runtimeError;
   List<Detection> get lastDetections => _lastDetections;
   Duration? get lastInferenceDuration => _lastInferenceDuration;
+  List<DetectionHistoryEntry> get history => List<DetectionHistoryEntry>.unmodifiable(_history);
 
   Future<void> initialize() async {
     try {
@@ -57,6 +71,19 @@ class AppController extends ChangeNotifier {
     } catch (error, stackTrace) {
       debugPrint('WVAB settings initialization failed; using safe defaults: $error\n$stackTrace');
       _settings = const AppSettings();
+    }
+
+    try {
+      _history = (await historyStore.load()).take(300).toList(growable: true);
+    } catch (error, stackTrace) {
+      debugPrint('WVAB history initialization failed; continuing with empty history: $error\n$stackTrace');
+      _history = <DetectionHistoryEntry>[];
+    }
+
+    try {
+      await labelLocalizer.initialize();
+    } catch (error, stackTrace) {
+      debugPrint('WVAB label localization initialization failed; using English label fallback: $error\n$stackTrace');
     }
 
     try {
@@ -68,6 +95,9 @@ class AppController extends ChangeNotifier {
 
     try {
       await speechService.initialize(_settings.languageCode);
+      if (_settings.firstRunCompleted && _settings.userName.trim().isNotEmpty) {
+        unawaited(_speakWelcome());
+      }
     } catch (error, stackTrace) {
       debugPrint('WVAB TTS initialization failed; continuing without startup failure: $error\n$stackTrace');
     }
@@ -81,10 +111,10 @@ class AppController extends ChangeNotifier {
     if (settings.detectionConfidence < 0.05 || settings.detectionConfidence > 0.99) {
       throw const FormatException('Detection confidence must be between 0.05 and 0.99.');
     }
-    _settings = settings;
-    await settingsStore.save(settings);
+    _settings = settings.copyWith(userName: settings.userName.trim());
+    await settingsStore.save(_settings);
     try {
-      await speechService.setLanguage(settings.languageCode);
+      await speechService.setLanguage(_settings.languageCode);
     } catch (error, stackTrace) {
       debugPrint('WVAB TTS language update failed: $error\n$stackTrace');
     }
@@ -92,21 +122,28 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> completeOnboarding({
+    String? userName,
     required String languageCode,
     required CameraSourceType cameraSource,
   }) async {
-    if (!AppStrings.supportedLanguages.containsKey(languageCode)) {
+    final name = (userName ?? _settings.userName).trim();
+    if (name.length < 2 || name.length > 80) {
+      throw const FormatException('Please enter your name (2–80 characters).');
+    }
+    if (!LanguageCatalog.contains(languageCode)) {
       throw const FormatException('Unsupported language.');
     }
     await updateSettings(_settings.copyWith(
       firstRunCompleted: true,
+      userName: name,
       languageCode: languageCode,
       cameraSource: cameraSource,
     ));
+    unawaited(_speakWelcome());
   }
 
   Future<void> setLanguage(String languageCode) async {
-    if (!AppStrings.supportedLanguages.containsKey(languageCode)) return;
+    if (!LanguageCatalog.contains(languageCode)) return;
     await updateSettings(_settings.copyWith(languageCode: languageCode));
   }
 
@@ -128,7 +165,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> ensureInferenceReady() {
     if (_runtimeState == LocalRuntimeState.ready && inferenceEngine.isReady) {
-      return Future.value();
+      return Future<void>.value();
     }
     final existing = _inferenceInitialization;
     if (existing != null) return existing;
@@ -187,18 +224,88 @@ class AppController extends ChangeNotifier {
     _lastDetections = selected;
     _lastInferenceDuration = result.inferenceDuration;
 
-    final event = guidanceEngine.choose(selected);
-    if (event != null) {
-      unawaited(announce(
-        standaloneStrings.guidanceMessage(event.detection.label, event.proximity),
-        urgent: event.urgent,
-      ));
+    _recordHistory(selected);
+
+    final events = guidanceEngine.chooseMany(selected, maxEvents: 3);
+    if (events.isNotEmpty) {
+      final message = events
+          .map((event) => labelLocalizer.guidanceMessage(
+                event.detection.label,
+                event.proximity,
+                event.direction,
+                _settings.languageCode,
+              ))
+          .join('. ');
+      unawaited(announce(message, urgent: events.any((event) => event.urgent)));
     }
     notifyListeners();
     return MobileInferenceResult(
       detections: selected,
       inferenceDuration: result.inferenceDuration,
     );
+  }
+
+  String localizedObjectLabel(String label) => labelLocalizer.objectLabel(label, _settings.languageCode);
+
+  Future<void> clearHistory() async {
+    _history = <DetectionHistoryEntry>[];
+    _lastHistoryCapture.clear();
+    await historyStore.clear();
+    notifyListeners();
+  }
+
+  void _recordHistory(List<Detection> detections) {
+    if (detections.isEmpty) return;
+    final now = DateTime.now();
+    final bestByLabel = <String, Detection>{};
+    for (final detection in detections) {
+      final previous = bestByLabel[detection.label];
+      if (previous == null || detection.confidence > previous.confidence) {
+        bestByLabel[detection.label] = detection;
+      }
+    }
+
+    final ordered = bestByLabel.values.toList(growable: false)
+      ..sort((a, b) => b.confidence.compareTo(a.confidence));
+    var changed = false;
+    for (final detection in ordered.take(5)) {
+      final last = _lastHistoryCapture[detection.label];
+      if (last != null && now.difference(last) < const Duration(seconds: 5)) continue;
+      _lastHistoryCapture[detection.label] = now;
+      _history.insert(
+        0,
+        DetectionHistoryEntry(
+          id: '${now.microsecondsSinceEpoch}-${detection.classId}-${detection.label}',
+          timestamp: now,
+          classId: detection.classId,
+          label: detection.label,
+          confidence: detection.confidence,
+          proximity: classifyRelativeProximity(detection.box),
+          direction: classifySpatialDirection(detection.box),
+          cameraSource: _settings.cameraSource.storageValue,
+        ),
+      );
+      changed = true;
+    }
+    if (!changed) return;
+    if (_history.length > 300) {
+      _history.removeRange(300, _history.length);
+    }
+    final snapshot = List<DetectionHistoryEntry>.from(_history);
+    _historyWrite = _historyWrite.then((_) => historyStore.save(snapshot)).catchError((Object error, StackTrace stackTrace) {
+      debugPrint('WVAB detection history write failed: $error\n$stackTrace');
+    });
+  }
+
+  Future<void> _speakWelcome() async {
+    if (!_settings.speechEnabled || _settings.userName.trim().isEmpty) return;
+    try {
+      await speechService.speak(
+        labelLocalizer.welcomeMessage(_settings.userName, _settings.languageCode),
+      );
+    } catch (error, stackTrace) {
+      debugPrint('WVAB welcome speech failed: $error\n$stackTrace');
+    }
   }
 
   Future<void> announce(String message, {bool urgent = false}) async {

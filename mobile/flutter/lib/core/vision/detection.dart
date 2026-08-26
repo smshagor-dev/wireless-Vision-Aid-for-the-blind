@@ -9,6 +9,7 @@ class BoundingBox {
   double get width => (right - left).clamp(0.0, 1.0);
   double get height => (bottom - top).clamp(0.0, 1.0);
   double get area => width * height;
+  double get centerX => ((left + right) / 2).clamp(0.0, 1.0);
 
   BoundingBox clamp() => BoundingBox(
         left: left.clamp(0.0, 1.0),
@@ -33,6 +34,7 @@ class Detection {
 }
 
 enum ProximityBand { immediate, close, medium, far }
+enum SpatialDirection { left, center, right }
 
 ProximityBand classifyRelativeProximity(BoundingBox box) {
   final ratio = box.height;
@@ -40,4 +42,11 @@ ProximityBand classifyRelativeProximity(BoundingBox box) {
   if (ratio > 0.40) return ProximityBand.close;
   if (ratio > 0.20) return ProximityBand.medium;
   return ProximityBand.far;
+}
+
+SpatialDirection classifySpatialDirection(BoundingBox box) {
+  final center = box.centerX;
+  if (center < 0.38) return SpatialDirection.left;
+  if (center > 0.62) return SpatialDirection.right;
+  return SpatialDirection.center;
 }
