@@ -161,7 +161,7 @@ void main() {
     expect(controller.runtimeState, LocalRuntimeState.ready);
   });
 
-  test('exact distinct objects reach voice guidance and local detection history', () async {
+  test('all detections are preserved while speech focuses one navigation target', () async {
     final inference = _ExactInferenceEngine();
     final speech = _RecordingSpeechService();
     final historyStore = MemoryDetectionHistoryStore();
@@ -182,8 +182,14 @@ void main() {
     expect(result.detections.map((item) => item.label).toSet(), {'person', 'book', 'bottle'});
     expect(speech.spoken, hasLength(1));
     expect(speech.spoken.single, contains('Book'));
-    expect(speech.spoken.single, contains('Bottle'));
-    expect(speech.spoken.single, contains('Person'));
+    expect(speech.spoken.single, isNot(contains('Bottle')));
+    expect(speech.spoken.single, isNot(contains('Person')));
+    expect(
+      speech.spoken.single.contains('Move') ||
+          speech.spoken.single.contains('Path') ||
+          speech.spoken.single.contains('Stop'),
+      isTrue,
+    );
     expect(controller.history.map((item) => item.label).toSet(), {'person', 'book', 'bottle'});
 
     await Future<void>.delayed(Duration.zero);

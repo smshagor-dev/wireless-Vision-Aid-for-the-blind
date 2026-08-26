@@ -226,17 +226,12 @@ class AppController extends ChangeNotifier {
 
     _recordHistory(selected);
 
-    final events = guidanceEngine.chooseMany(selected, maxEvents: 3);
-    if (events.isNotEmpty) {
-      final message = events
-          .map((event) => labelLocalizer.guidanceMessage(
-                event.detection.label,
-                event.proximity,
-                event.direction,
-                _settings.languageCode,
-              ))
-          .join('. ');
-      unawaited(announce(message, urgent: events.any((event) => event.urgent)));
+    final event = guidanceEngine.choose(selected);
+    if (event != null) {
+      unawaited(announce(
+        labelLocalizer.focusedGuidanceMessage(event, _settings.languageCode),
+        urgent: event.urgent,
+      ));
     }
     notifyListeners();
     return MobileInferenceResult(
