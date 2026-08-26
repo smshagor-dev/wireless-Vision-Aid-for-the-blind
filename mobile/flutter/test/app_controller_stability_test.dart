@@ -161,7 +161,7 @@ void main() {
     expect(controller.runtimeState, LocalRuntimeState.ready);
   });
 
-  test('all detections are preserved while speech focuses one navigation target', () async {
+  test('all detections remain available while speech and UI focus one object with distance and route', () async {
     final inference = _ExactInferenceEngine();
     final speech = _RecordingSpeechService();
     final historyStore = MemoryDetectionHistoryStore();
@@ -180,14 +180,16 @@ void main() {
 
     expect(inference.threshold, 0.25);
     expect(result.detections.map((item) => item.label).toSet(), {'person', 'book', 'bottle'});
+    expect(result.detections.first.label, 'book');
+    expect(controller.focusedGuidance, isNotNull);
+    expect(controller.focusedGuidance!.detection.label, 'book');
     expect(speech.spoken, hasLength(1));
     expect(speech.spoken.single, contains('Book'));
+    expect(speech.spoken.single, contains('estimated 1 to 2 meters away'));
     expect(speech.spoken.single, isNot(contains('Bottle')));
     expect(speech.spoken.single, isNot(contains('Person')));
     expect(
-      speech.spoken.single.contains('Move') ||
-          speech.spoken.single.contains('Path') ||
-          speech.spoken.single.contains('Stop'),
+      speech.spoken.single.contains('appears clearer') || speech.spoken.single.contains('Stop'),
       isTrue,
     );
     expect(controller.history.map((item) => item.label).toSet(), {'person', 'book', 'bottle'});
