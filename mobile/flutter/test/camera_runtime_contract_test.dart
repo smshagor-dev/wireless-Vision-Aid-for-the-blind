@@ -20,7 +20,7 @@ void main() {
 
     expect(pubspec, contains('version: 1.0.0+8'));
     expect(pubspec, contains('camera_android: 0.10.11'));
-    expect(pubspec, contains('flutter_onnxruntime: 1.7.1'));
+    expect(pubspec, contains('flutter_onnxruntime: 1.8.0'));
     expect(pubspec, isNot(contains('version: 1.0.1')));
     expect(pubspec, isNot(contains('version: 1.0.2')));
   });
