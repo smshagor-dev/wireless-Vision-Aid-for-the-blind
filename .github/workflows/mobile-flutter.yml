@@ -16,11 +16,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: mobile-flutter-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   flutter-mobile:
@@ -143,42 +143,3 @@ jobs:
           path: mobile/flutter/build/app/outputs/flutter-apk/*-release.apk
           if-no-files-found: error
           retention-days: 7
-
-      - name: Publish WVAB v1.0.0 arm64 demo
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.actor != 'github-actions[bot]'
-        shell: bash
-        run: |
-          set -euo pipefail
-          grep -F 'version: 1.0.0+6' pubspec.yaml >/dev/null || { echo 'Not the v1.0.0+6 build; skipping repository demo publish.'; exit 0; }
-          target="demo/wvab-mobile-demo-arm64-v8a.apk"
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "$target"
-          sha256sum "$target" | sed 's#  demo/#  #' > demo/SHA256SUMS.txt
-          cat > demo/README.md <<'EOF'
-          # WVAB Mobile v1.0.0 Demo APK
-
-          `wvab-mobile-demo-arm64-v8a.apk` is the WVAB Mobile **v1.0.0** Android release demo for 64-bit ARM devices.
-
-          - App version: 1.0.0 (build 6)
-          - Full model coverage: all 80 classes supported by the bundled YOLOv8n COCO model are enabled by default.
-          - Existing installs migrate from the previous 11-class selection to the full 80-class detector set.
-          - Startup failures from settings, keystore, TTS, or optional feedback are isolated instead of terminating the app.
-          - Inference uses XNNPACK with CPU fallback for wider Android device stability.
-          - TTS/haptics run outside the inference hot path so camera detection does not wait for speech completion.
-          - Current restored WVAB launcher branding is used; the old deterministic launcher icon is blocked by CI.
-          - Build type: optimized Flutter release APK.
-          - ABI: arm64-v8a.
-          - Minimum Android SDK: 24.
-
-          The bundled detector recognizes the 80 COCO classes it was trained for. Custom WVAB mobility classes such as curb, pothole, or stairs require an appropriately trained model.
-
-          Verify the APK against `SHA256SUMS.txt` after download.
-          EOF
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add demo/README.md demo/SHA256SUMS.txt "$target"
-          if git diff --cached --quiet; then
-            echo "v1.0.0 demo APK is already current."
-            exit 0
-          fi
-          git commit -m "Publish WVAB mobile v1.0.0 demo [skip ci]"
-          git push origin HEAD:main
