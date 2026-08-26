@@ -60,6 +60,11 @@ AppController _controller({bool onboarded = true, _FakeSpeechService? speech}) {
   );
 }
 
+Future<void> _pumpNavigation(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+}
+
 void main() {
   testWidgets('first launch requires name and completes local onboarding without a backend', (tester) async {
     final speech = _FakeSpeechService();
@@ -73,7 +78,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('onboarding-name')), 'Shagor');
     await tester.scrollUntilVisible(find.byKey(const Key('onboarding-finish')), 300);
     await tester.tap(find.byKey(const Key('onboarding-finish')));
-    await tester.pumpAndSettle();
+    await _pumpNavigation(tester);
 
     expect(controller.settings.firstRunCompleted, isTrue);
     expect(controller.settings.userName, 'Shagor');
@@ -116,12 +121,12 @@ void main() {
     await controller.initialize();
     await tester.pumpWidget(WvabMobileApp(controller: controller));
     await tester.tap(find.byKey(const Key('language-button')));
-    await tester.pumpAndSettle();
+    await _pumpNavigation(tester);
 
     expect(find.byKey(const Key('language-search')), findsOneWidget);
     expect(find.byKey(const Key('language-es-ES')), findsOneWidget);
     await tester.tap(find.byKey(const Key('language-bn-BD')));
-    await tester.pumpAndSettle();
+    await _pumpNavigation(tester);
 
     expect(controller.settings.languageCode, 'bn-BD');
   });
@@ -131,7 +136,7 @@ void main() {
     await controller.initialize();
     await tester.pumpWidget(WvabMobileApp(controller: controller));
     await tester.tap(find.text('Settings'));
-    await tester.pumpAndSettle();
+    await _pumpNavigation(tester);
 
     final settingsList = find.byKey(const Key('settings-list'));
     expect(settingsList, findsOneWidget);
@@ -142,7 +147,7 @@ void main() {
       300,
       scrollable: find.descendant(of: settingsList, matching: find.byType(Scrollable)),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.byKey(const Key('settings-save-button')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -154,14 +159,14 @@ void main() {
 
     expect(find.byKey(const Key('about-privacy')), findsOneWidget);
     await tester.tap(find.byKey(const Key('about-privacy')));
-    await tester.pumpAndSettle();
+    await _pumpNavigation(tester);
     expect(find.text('Privacy Policy'), findsOneWidget);
     expect(find.textContaining('smshagor.dev@gmail.com'), findsOneWidget);
     await tester.pageBack();
-    await tester.pumpAndSettle();
+    await _pumpNavigation(tester);
 
     await tester.tap(find.byKey(const Key('about-contact')));
-    await tester.pumpAndSettle();
+    await _pumpNavigation(tester);
     expect(find.text('smshagor.com'), findsOneWidget);
     expect(find.text('smshagor.dev@gmail.com'), findsOneWidget);
     expect(find.text('+79954949836'), findsOneWidget);
