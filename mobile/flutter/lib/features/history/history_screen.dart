@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/controllers/app_controller.dart';
+import '../../core/localization/app_strings.dart';
 import '../../core/models/detection_history_entry.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/ui_metrics.dart';
@@ -36,7 +37,7 @@ class HistoryScreen extends StatelessWidget {
                   key: const Key('history-list'),
                   padding: UiMetrics.lightPagePadding,
                   itemCount: entries.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, index) => _HistoryCard(
                     entry: entries[index],
                     objectName: controller.localizedObjectLabel(entries[index].label),
@@ -65,7 +66,7 @@ class HistoryScreen extends StatelessWidget {
 
 class _EmptyHistory extends StatelessWidget {
   const _EmptyHistory({required this.strings});
-  final dynamic strings;
+  final AppStrings strings;
 
   @override
   Widget build(BuildContext context) => ListView(
