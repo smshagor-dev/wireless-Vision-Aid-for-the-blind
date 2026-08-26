@@ -64,7 +64,7 @@ jobs:
           set -euo pipefail
           grep -Fx 'version: 1.0.0+8' pubspec.yaml >/dev/null
           grep -Fx '  camera_android: 0.10.11' pubspec.yaml >/dev/null
-          grep -Fx '  flutter_onnxruntime: 1.7.1' pubspec.yaml >/dev/null
+          grep -Fx '  flutter_onnxruntime: 1.8.0' pubspec.yaml >/dev/null
           if grep -Eq '^version: 1\.0\.[12]' pubspec.yaml; then
             echo 'Unexpected app version bump detected.' >&2
             exit 1
