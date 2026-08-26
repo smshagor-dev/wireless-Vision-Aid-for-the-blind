@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/controllers/app_controller.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/ui_metrics.dart';
+import '../../core/vision/coco_labels.dart';
 
 class DetectionSettingsScreen extends StatefulWidget {
   const DetectionSettingsScreen({super.key, required this.controller});
@@ -17,19 +18,7 @@ class _DetectionSettingsScreenState extends State<DetectionSettingsScreen> {
   late double _confidence;
   late Set<String> _classes;
 
-  static const _classKeys = <String>[
-    'person',
-    'car',
-    'truck',
-    'bus',
-    'bicycle',
-    'motorcycle',
-    'traffic light',
-    'stop sign',
-    'chair',
-    'bench',
-    'potted plant',
-  ];
+  static const _classKeys = coco80Labels;
 
   @override
   void initState() {
@@ -115,7 +104,19 @@ class _DetectionSettingsScreenState extends State<DetectionSettingsScreen> {
             ),
           ),
           const SizedBox(height: 22),
-          _SectionTitle(strings.get('detectClasses')),
+          Row(
+            children: [
+              Expanded(child: _SectionTitle('${strings.get('detectClasses')} (${_classes.length}/${_classKeys.length})')),
+              TextButton(
+                onPressed: () => setState(() => _classes = _classKeys.toSet()),
+                child: const Text('All'),
+              ),
+              TextButton(
+                onPressed: () => setState(_classes.clear),
+                child: const Text('None'),
+              ),
+            ],
+          ),
           const SizedBox(height: 10),
           _Panel(
             padding: EdgeInsets.zero,
@@ -129,6 +130,7 @@ class _DetectionSettingsScreenState extends State<DetectionSettingsScreen> {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 1),
                       value: _classes.contains(key),
                       title: Text(standalone.get(key), style: const TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: Text(key, style: const TextStyle(color: AppTheme.muted, fontSize: 12)),
                       activeColor: AppTheme.blue,
                       controlAffinity: ListTileControlAffinity.trailing,
                       secondary: Container(
