@@ -47,12 +47,14 @@ class AppController extends ChangeNotifier {
   Esp32Credentials? _esp32Credentials;
   LocalRuntimeState _runtimeState = LocalRuntimeState.idle;
   String? _runtimeError;
-  List<Detection> _lastDetections = const [];
+  List<Detection> _lastDetections = const <Detection>[];
   Duration? _lastInferenceDuration;
   Future<void>? _inferenceInitialization;
   List<DetectionHistoryEntry> _history = <DetectionHistoryEntry>[];
   Future<void> _historyWrite = Future<void>.value();
   final Map<String, DateTime> _lastHistoryCapture = <String, DateTime>{};
+  GuidanceEvent? _focusedGuidance;
+  bool _guidanceSpeechBusy = false;
 
   AppSettings get settings => _settings;
   AppStrings get strings => AppStrings(_settings.languageCode);
@@ -64,6 +66,7 @@ class AppController extends ChangeNotifier {
   List<Detection> get lastDetections => _lastDetections;
   Duration? get lastInferenceDuration => _lastInferenceDuration;
   List<DetectionHistoryEntry> get history => List<DetectionHistoryEntry>.unmodifiable(_history);
+  GuidanceEvent? get focusedGuidance => _focusedGuidance;
 
   Future<void> initialize() async {
     try {
@@ -221,26 +224,47 @@ class AppController extends ChangeNotifier {
     final selected = remapped
         .where((detection) => _settings.detectedClasses.contains(detection.label))
         .toList(growable: false);
-    _lastDetections = selected;
     _lastInferenceDuration = result.inferenceDuration;
 
     _recordHistory(selected);
 
-    final event = guidanceEngine.choose(selected);
-    if (event != null) {
-      unawaited(announce(
-        labelLocalizer.focusedGuidanceMessage(event, _settings.languageCode),
-        urgent: event.urgent,
-      ));
+    if (selected.isEmpty) {
+      _focusedGuidance = null;
+    } else {
+      final currentFocus = _focusedGuidance;
+      if (currentFocus != null &&
+          !selected.any((detection) => detection.label == currentFocus.detection.label)) {
+        _focusedGuidance = null;
+      }
+      if (!_guidanceSpeechBusy) {
+        final event = guidanceEngine.choose(selected);
+        if (event != null) {
+          _focusedGuidance = event;
+          unawaited(_announceFocusedGuidance(event));
+        }
+      }
     }
+
+    final focusLabel = _focusedGuidance?.detection.label;
+    final displayDetections = focusLabel == null
+        ? selected
+        : <Detection>[
+            ...selected.where((detection) => detection.label == focusLabel),
+            ...selected.where((detection) => detection.label != focusLabel),
+          ];
+    _lastDetections = displayDetections;
+
     notifyListeners();
     return MobileInferenceResult(
-      detections: selected,
+      detections: displayDetections,
       inferenceDuration: result.inferenceDuration,
     );
   }
 
   String localizedObjectLabel(String label) => labelLocalizer.objectLabel(label, _settings.languageCode);
+
+  String focusedGuidanceText(GuidanceEvent event) =>
+      labelLocalizer.focusedGuidanceMessage(event, _settings.languageCode);
 
   Future<void> clearHistory() async {
     _history = <DetectionHistoryEntry>[];
@@ -292,6 +316,19 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  Future<void> _announceFocusedGuidance(GuidanceEvent event) async {
+    if (_guidanceSpeechBusy) return;
+    _guidanceSpeechBusy = true;
+    try {
+      await announce(
+        labelLocalizer.focusedGuidanceMessage(event, _settings.languageCode),
+        urgent: event.urgent,
+      );
+    } finally {
+      _guidanceSpeechBusy = false;
+    }
+  }
+
   Future<void> _speakWelcome() async {
     if (!_settings.speechEnabled || _settings.userName.trim().isEmpty) return;
     try {
@@ -326,10 +363,13 @@ class AppController extends ChangeNotifier {
 
   Future<void> stopFeedback() async {
     guidanceEngine.reset();
+    _focusedGuidance = null;
     try {
       await speechService.stop();
     } catch (error, stackTrace) {
       debugPrint('WVAB speech stop failed: $error\n$stackTrace');
+    } finally {
+      _guidanceSpeechBusy = false;
     }
   }
 

@@ -78,9 +78,10 @@ double? estimateApproximateDistanceMeters(Detection detection) {
   if (objectHeight == null || normalizedPixelHeight < 0.08) return null;
 
   // Approximate vertical focal length for a typical ~60 degree phone-camera
-  // field of view, expressed in normalized frame-height units.
+  // field of view, expressed in normalized frame-height units. This is only a
+  // coarse fallback until device-specific calibration/depth hardware is used.
   const normalizedFocalLength = 0.87;
   final meters = (objectHeight * normalizedFocalLength) / normalizedPixelHeight;
   if (!meters.isFinite || meters <= 0 || meters > 20) return null;
-  return meters.clamp(0.4, 20.0);
+  return meters.clamp(0.4, 20.0).toDouble();
 }
