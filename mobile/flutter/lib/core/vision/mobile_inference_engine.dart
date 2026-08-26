@@ -40,19 +40,30 @@ class OnnxMobileInferenceEngine implements InferenceEngine {
     if (_session != null) return;
     final available = await _runtime.getAvailableProviders();
     final providers = <OrtProvider>[
-      if (available.contains(OrtProvider.NNAPI)) OrtProvider.NNAPI,
       if (available.contains(OrtProvider.XNNPACK)) OrtProvider.XNNPACK,
       OrtProvider.CPU,
     ];
-    _session = await _runtime.createSessionFromAsset(
-      assetPath,
-      options: OrtSessionOptions(
-        providers: providers.toSet().toList(),
-        intraOpNumThreads: 2,
-        interOpNumThreads: 1,
-        useArena: true,
-      ),
-    );
+    try {
+      _session = await _runtime.createSessionFromAsset(
+        assetPath,
+        options: OrtSessionOptions(
+          providers: providers,
+          intraOpNumThreads: 2,
+          interOpNumThreads: 1,
+          useArena: true,
+        ),
+      );
+    } catch (_) {
+      _session = await _runtime.createSessionFromAsset(
+        assetPath,
+        options: OrtSessionOptions(
+          providers: const [OrtProvider.CPU],
+          intraOpNumThreads: 2,
+          interOpNumThreads: 1,
+          useArena: true,
+        ),
+      );
+    }
     if (_session!.inputNames.isEmpty || _session!.outputNames.isEmpty) {
       await close();
       throw StateError('WVAB ONNX model has no usable inputs or outputs.');
