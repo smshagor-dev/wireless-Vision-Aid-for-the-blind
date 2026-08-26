@@ -65,49 +65,55 @@ class AboutScreen extends StatelessWidget {
           const SizedBox(height: 26),
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
               borderRadius: BorderRadius.circular(UiMetrics.cardRadius),
-              border: Border.all(color: AppTheme.border),
               boxShadow: const [BoxShadow(color: Color(0x08000000), blurRadius: 10, offset: Offset(0, 3))],
             ),
-            child: Column(
-              children: [
-                _AboutTile(
-                  key: const Key('about-privacy'),
-                  icon: Icons.privacy_tip_outlined,
-                  title: strings.get('privacyPolicy'),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(builder: (_) => PrivacyPolicyScreen(controller: controller)),
+            child: Material(
+              color: Colors.white,
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(UiMetrics.cardRadius),
+                side: const BorderSide(color: AppTheme.border),
+              ),
+              child: Column(
+                children: [
+                  _AboutTile(
+                    key: const Key('about-privacy'),
+                    icon: Icons.privacy_tip_outlined,
+                    title: strings.get('privacyPolicy'),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => PrivacyPolicyScreen(controller: controller)),
+                    ),
                   ),
-                ),
-                const Divider(height: 1, indent: 68),
-                _AboutTile(
-                  key: const Key('about-licenses'),
-                  icon: Icons.code_rounded,
-                  title: strings.get('openSourceLicenses'),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(builder: (_) => OpenSourceLicensesScreen(controller: controller)),
+                  const Divider(height: 1, indent: 68),
+                  _AboutTile(
+                    key: const Key('about-licenses'),
+                    icon: Icons.code_rounded,
+                    title: strings.get('openSourceLicenses'),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => OpenSourceLicensesScreen(controller: controller)),
+                    ),
                   ),
-                ),
-                const Divider(height: 1, indent: 68),
-                _AboutTile(
-                  key: const Key('about-how-it-works'),
-                  icon: Icons.help_outline_rounded,
-                  title: strings.get('howItWorks'),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(builder: (_) => HowItWorksScreen(controller: controller)),
+                  const Divider(height: 1, indent: 68),
+                  _AboutTile(
+                    key: const Key('about-how-it-works'),
+                    icon: Icons.help_outline_rounded,
+                    title: strings.get('howItWorks'),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => HowItWorksScreen(controller: controller)),
+                    ),
                   ),
-                ),
-                const Divider(height: 1, indent: 68),
-                _AboutTile(
-                  key: const Key('about-contact'),
-                  icon: Icons.mail_outline_rounded,
-                  title: strings.get('contact'),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(builder: (_) => ContactScreen(controller: controller)),
+                  const Divider(height: 1, indent: 68),
+                  _AboutTile(
+                    key: const Key('about-contact'),
+                    icon: Icons.mail_outline_rounded,
+                    title: strings.get('contact'),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => ContactScreen(controller: controller)),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 26),
