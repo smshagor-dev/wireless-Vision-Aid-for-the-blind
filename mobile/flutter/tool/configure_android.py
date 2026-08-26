@@ -3,8 +3,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / 'android/app/src/main/AndroidManifest.xml'
-GRADLE = ROOT / 'android/app/build.gradle.kts'
+APP_GRADLE = ROOT / 'android/app/build.gradle.kts'
+ROOT_GRADLE = ROOT / 'android/build.gradle.kts'
 PROGUARD = ROOT / 'android/app/proguard-rules.pro'
+ORT_ANDROID_COORDINATE = 'com.microsoft.onnxruntime:onnxruntime-android:1.22.0'
 
 
 def configure_manifest() -> None:
@@ -54,8 +56,27 @@ def configure_proguard() -> None:
     )
 
 
-def configure_gradle() -> None:
-    text = GRADLE.read_text(encoding='utf-8')
+def configure_root_gradle() -> None:
+    text = ROOT_GRADLE.read_text(encoding='utf-8')
+    marker = f'force("{ORT_ANDROID_COORDINATE}")'
+    if marker not in text:
+        stanza = (
+            '\n// WVAB v1.0.0 stability pin: flutter_onnxruntime 1.8.2 contains the\n'
+            '// Kotlin compatibility fix, while Android stays on ORT 1.22.0.\n'
+            'allprojects {\n'
+            '    configurations.configureEach {\n'
+            '        resolutionStrategy {\n'
+            f'            force("{ORT_ANDROID_COORDINATE}")\n'
+            '        }\n'
+            '    }\n'
+            '}\n'
+        )
+        text = text.rstrip() + '\n' + stanza
+    ROOT_GRADLE.write_text(text, encoding='utf-8')
+
+
+def configure_app_gradle() -> None:
+    text = APP_GRADLE.read_text(encoding='utf-8')
     if 'minSdk = 24' not in text:
         source = 'minSdk = flutter.minSdkVersion'
         if source not in text:
@@ -77,15 +98,16 @@ def configure_gradle() -> None:
             + '            )'
         )
         text = text.replace(signing, release_stability, 1)
-    GRADLE.write_text(text, encoding='utf-8')
+    APP_GRADLE.write_text(text, encoding='utf-8')
 
 
 def main() -> None:
-    if not MANIFEST.is_file() or not GRADLE.is_file():
+    if not MANIFEST.is_file() or not APP_GRADLE.is_file() or not ROOT_GRADLE.is_file():
         raise SystemExit('Run flutter create for Android before configuring the host project')
     configure_manifest()
     configure_proguard()
-    configure_gradle()
+    configure_root_gradle()
+    configure_app_gradle()
 
 
 if __name__ == '__main__':
