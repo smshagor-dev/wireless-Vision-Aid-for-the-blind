@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../localization/app_strings.dart';
@@ -187,10 +189,10 @@ class AppController extends ChangeNotifier {
 
     final event = guidanceEngine.choose(selected);
     if (event != null) {
-      await announce(
+      unawaited(announce(
         standaloneStrings.guidanceMessage(event.detection.label, event.proximity),
         urgent: event.urgent,
-      );
+      ));
     }
     notifyListeners();
     return MobileInferenceResult(
