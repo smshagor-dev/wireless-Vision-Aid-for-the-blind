@@ -1,0 +1,184 @@
+name: Publish latest WVAB v1.0.0 APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-latest-v1.0.0-apk.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Verify, build, and replace demo APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile/flutter
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter 3.47.0
+        uses: subosito/flutter-action@v2.23.0
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: mobile/flutter/tool/model-export-requirements.txt
+
+      - name: Install pinned model exporter
+        run: python -m pip install --disable-pip-version-check -r tool/model-export-requirements.txt
+
+      - name: Export offline ONNX model
+        run: python tool/export_mobile_model.py
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Verify v1.0.0 contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fx 'version: 1.0.0+8' pubspec.yaml >/dev/null
+          grep -Fx '  camera_android: 0.10.11' pubspec.yaml >/dev/null
+          grep -Fx '  flutter_onnxruntime: 1.8.2' pubspec.yaml >/dev/null
+          if grep -Eq '^version: 1\.0\.[12]' pubspec.yaml; then
+            echo 'Unexpected visible version bump.' >&2
+            exit 1
+          fi
+
+      - name: Analyze Dart source
+        run: flutter analyze
+
+      - name: Run non-widget Flutter tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test_file in test/*_test.dart; do
+            if [ "$test_file" = "test/widget_test.dart" ]; then
+              continue
+            fi
+            echo "::group::${test_file}"
+            timeout --signal=TERM --kill-after=10s 90s flutter test "$test_file" -r expanded
+            echo "::endgroup::"
+          done
+
+      - name: Run widget tests in isolated processes
+        shell: bash
+        run: |
+          set -euo pipefail
+          tests=(
+            'first launch requires name and completes local onboarding without a backend'
+            'home matches approved assistance-first proportions'
+            'home remains overflow-free on compact phone viewport'
+            'language selection changes the app and exposes expanded language search'
+            'settings keeps the fixed bottom navigation and save action'
+            'about legal help and contact pages are functional'
+          )
+          for test_name in "${tests[@]}"; do
+            echo "::group::widget: ${test_name}"
+            timeout --signal=TERM --kill-after=10s 90s flutter test test/widget_test.dart --plain-name "$test_name" -r expanded
+            echo "::endgroup::"
+          done
+
+      - name: Generate Android host project and branding
+        run: bash tool/bootstrap_android.sh
+
+      - name: Verify Android contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'minSdk = 24' android/app/build.gradle.kts >/dev/null
+          grep -F 'force("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")' android/build.gradle.kts >/dev/null
+          grep -F -- '-keep class ai.onnxruntime.** { *; }' android/app/proguard-rules.pro >/dev/null
+          grep -F 'android.permission.CAMERA' android/app/src/main/AndroidManifest.xml >/dev/null
+          grep -F 'android.permission.INTERNET' android/app/src/main/AndroidManifest.xml >/dev/null
+          grep -F 'android.permission.VIBRATE' android/app/src/main/AndroidManifest.xml >/dev/null
+          grep -F 'android.intent.action.TTS_SERVICE' android/app/src/main/AndroidManifest.xml >/dev/null
+          test -s assets/models/yolov8n_320.onnx
+
+      - name: Verify resolved ORT runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd android
+            ./gradlew :app:dependencyInsight --dependency onnxruntime-android --configuration releaseRuntimeClasspath
+          ) | tee /tmp/wvab-ort-dependency.txt
+          grep -F 'com.microsoft.onnxruntime:onnxruntime-android:1.22.0' /tmp/wvab-ort-dependency.txt >/dev/null
+
+      - name: Build fresh arm64 v1.0.0 APK
+        run: flutter build apk --release --split-per-abi
+
+      - name: Inspect fresh APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk='build/app/outputs/flutter-apk/app-arm64-v8a-release.apk'
+          test -s "$apk"
+          size="$(stat -c%s "$apk")"
+          echo "Fresh arm64 APK size: ${size} bytes"
+          test "$size" -lt 104857600
+          unzip -l "$apk" | grep -F 'lib/arm64-v8a/libonnxruntime.so' >/dev/null
+          unzip -l "$apk" | grep -F 'assets/flutter_assets/assets/models/yolov8n_320.onnx' >/dev/null
+          unzip -p "$apk" lib/arm64-v8a/libonnxruntime.so > /tmp/libonnxruntime.so
+          file /tmp/libonnxruntime.so | grep -E 'ELF 64-bit.*ARM aarch64|ELF 64-bit.*aarch64' >/dev/null
+          readelf -d /tmp/libonnxruntime.so > /tmp/onnxruntime.dynamic.txt
+          if grep -Eq 'libc\.so\.6|libstdc\+\+\.so\.6|ld-linux|librt\.so\.1|libdl\.so\.2' /tmp/onnxruntime.dynamic.txt; then
+            echo 'Wrong-platform Linux/glibc ONNX Runtime dependency found.' >&2
+            exit 1
+          fi
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          "$AAPT" dump badging "$apk" > /tmp/wvab.badging.txt
+          grep -F "versionName='1.0.0'" /tmp/wvab.badging.txt >/dev/null
+          grep -F "package: name='com.smshagor.wvab_mobile'" /tmp/wvab.badging.txt >/dev/null
+          sha256sum "$apk"
+
+      - name: Replace old demo APK with fresh build
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk='build/app/outputs/flutter-apk/app-arm64-v8a-release.apk'
+          mkdir -p demo
+          rm -f demo/wvab-mobile-demo-arm64-v8a.apk
+          cp "$apk" demo/wvab-mobile-demo-arm64-v8a.apk
+          sha256sum demo/wvab-mobile-demo-arm64-v8a.apk | sed 's#demo/##' > demo/SHA256SUMS.txt
+          cat > demo/README.md <<'EOF'
+          # WVAB Mobile v1.0.0 Demo APK
+
+          Latest verified standalone Android arm64-v8a build.
+
+          - Visible version: v1.0.0
+          - Package: com.smshagor.wvab_mobile
+          - ABI: arm64-v8a
+          - Offline YOLOv8n ONNX model bundled
+          - Camera/TTS/vibration runtime contract validated in CI
+
+          Verify the APK with `SHA256SUMS.txt` before installation.
+          EOF
+
+      - name: Commit fresh demo APK to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ../..
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add mobile/flutter/demo/wvab-mobile-demo-arm64-v8a.apk mobile/flutter/demo/SHA256SUMS.txt mobile/flutter/demo/README.md
+          if git diff --cached --quiet; then
+            echo 'Fresh APK is byte-identical to current demo; nothing to commit.'
+            exit 0
+          fi
+          git commit -m 'Replace demo with latest WVAB v1.0.0 APK [skip ci]'
+          git push origin HEAD:main
