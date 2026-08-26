@@ -1,1 +1,1 @@
-27f416f6ef53d377e99567dd613bc62c3e37c2fb3594ea4d90aed94ab12f0cb5  wvab-mobile-demo-arm64-v8a.apk
+6c667389111b066dad437eea9da9c99b034102b7a4c4bebcf99fd3dd3d37292f  wvab-mobile-demo-arm64-v8a.apk
