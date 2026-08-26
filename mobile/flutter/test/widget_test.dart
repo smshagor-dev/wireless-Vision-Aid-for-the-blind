@@ -170,17 +170,19 @@ void main() {
 
     expect(find.byKey(const Key('about-privacy')), findsOneWidget);
     await tester.tap(find.byKey(const Key('about-privacy')));
-    await _pumpNavigation(tester);
+    await tester.pumpAndSettle();
     expect(find.text('Privacy Policy'), findsWidgets);
     expect(find.text('Camera and visual processing'), findsOneWidget);
     await tester.pageBack();
-    await _pumpNavigation(tester);
+    await tester.pumpAndSettle();
 
     final contactTile = find.byKey(const Key('about-contact'));
-    await tester.ensureVisible(contactTile);
-    await tester.pump();
-    await tester.tap(contactTile);
-    await _pumpNavigation(tester);
+    final aboutScroll = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(contactTile, 120, scrollable: aboutScroll);
+    await tester.pumpAndSettle();
+    expect(contactTile.hitTestable(), findsOneWidget);
+    await tester.tap(contactTile.hitTestable());
+    await tester.pumpAndSettle();
     expect(find.text('Contact'), findsWidgets);
     expect(find.text('smshagor.com'), findsOneWidget);
     expect(find.text('smshagor.dev@gmail.com'), findsOneWidget);
