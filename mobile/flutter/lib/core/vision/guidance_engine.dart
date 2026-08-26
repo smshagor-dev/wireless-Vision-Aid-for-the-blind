@@ -40,7 +40,9 @@ class GuidanceEngine {
     final candidates = detections.where((item) => item.box.area > 0).toList(growable: false);
     if (candidates.isEmpty) return null;
 
-    final focused = _findHeldFocus(candidates, current) ?? _selectPrimary(candidates);
+    final primary = _selectPrimary(candidates);
+    final held = _findHeldFocus(candidates, current);
+    final focused = held == null || _shouldPreempt(held, primary) ? primary : held;
     final proximity = classifyRelativeProximity(focused.box);
     final direction = classifySpatialDirection(focused.box);
     final cue = _navigationCue(focused, candidates, proximity, direction);
@@ -62,6 +64,13 @@ class GuidanceEngine {
       urgent: proximity == ProximityBand.immediate || cue == NavigationCue.stop,
       approximateDistanceMeters: estimateApproximateDistanceMeters(focused),
     );
+  }
+
+  bool _shouldPreempt(Detection held, Detection primary) {
+    if (held.label == primary.label) return false;
+    final heldRank = _proximityRank(classifyRelativeProximity(held.box));
+    final primaryRank = _proximityRank(classifyRelativeProximity(primary.box));
+    return primaryRank < heldRank;
   }
 
   Detection? _findHeldFocus(List<Detection> detections, DateTime current) {
@@ -91,8 +100,12 @@ class GuidanceEngine {
         .compareTo(_proximityRank(classifyRelativeProximity(b.box)));
     if (proximityCompare != 0) return proximityCompare;
 
-    // Objects in the walking corridor are more relevant than equally-close
-    // detections at the far edges of the frame.
+    // Within the same broad range, a visibly larger object is treated as
+    // nearer before corridor position. This avoids a center person repeatedly
+    // suppressing a larger/nearer chair, book, bottle, etc.
+    final heightCompare = b.box.height.compareTo(a.box.height);
+    if (heightCompare != 0) return heightCompare;
+
     final centerCompare = _centerRank(a.box).compareTo(_centerRank(b.box));
     if (centerCompare != 0) return centerCompare;
 
@@ -146,7 +159,7 @@ class GuidanceEngine {
     for (final detection in detections) {
       final overlapLeft = detection.box.left > laneLeft ? detection.box.left : laneLeft;
       final overlapRight = detection.box.right < laneRight ? detection.box.right : laneRight;
-      final overlap = (overlapRight - overlapLeft).clamp(0.0, laneWidth);
+      final overlap = (overlapRight - overlapLeft).clamp(0.0, laneWidth).toDouble();
       if (overlap <= 0) continue;
       final proximityWeight = switch (classifyRelativeProximity(detection.box)) {
         ProximityBand.immediate => 1.0,
