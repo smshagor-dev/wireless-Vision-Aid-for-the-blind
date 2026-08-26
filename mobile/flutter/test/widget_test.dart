@@ -176,8 +176,12 @@ void main() {
     await tester.pageBack();
     await _pumpNavigation(tester);
 
-    await tester.tap(find.byKey(const Key('about-contact')));
+    final contactTile = find.byKey(const Key('about-contact'));
+    await tester.ensureVisible(contactTile);
+    await tester.pump();
+    await tester.tap(contactTile);
     await _pumpNavigation(tester);
+    expect(find.text('Contact'), findsWidgets);
     expect(find.text('smshagor.com'), findsOneWidget);
     expect(find.text('smshagor.dev@gmail.com'), findsOneWidget);
     expect(find.text('+79954949836'), findsOneWidget);
