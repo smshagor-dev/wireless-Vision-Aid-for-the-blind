@@ -64,7 +64,7 @@ jobs:
           set -euo pipefail
           grep -Fx 'version: 1.0.0+8' pubspec.yaml >/dev/null
           grep -Fx '  camera_android: 0.10.11' pubspec.yaml >/dev/null
-          grep -Fx '  flutter_onnxruntime: 1.8.0' pubspec.yaml >/dev/null
+          grep -Fx '  flutter_onnxruntime: 1.8.2' pubspec.yaml >/dev/null
           if grep -Eq '^version: 1\.0\.[12]' pubspec.yaml; then
             echo 'Unexpected app version bump detected.' >&2
             exit 1
@@ -87,6 +87,7 @@ jobs:
           grep -F 'isMinifyEnabled = false' android/app/build.gradle.kts >/dev/null
           grep -F 'isShrinkResources = false' android/app/build.gradle.kts >/dev/null
           grep -F 'proguard-rules.pro' android/app/build.gradle.kts >/dev/null
+          grep -F 'force("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")' android/build.gradle.kts >/dev/null
           grep -F -- '-keep class ai.onnxruntime.** { *; }' android/app/proguard-rules.pro >/dev/null
           grep -F -- '-keepclasseswithmembernames class *' android/app/proguard-rules.pro >/dev/null
           grep -F 'android.permission.CAMERA' android/app/src/main/AndroidManifest.xml >/dev/null
@@ -138,6 +139,18 @@ jobs:
           if 84 not in manifest['output_shape'][1:]:
               raise SystemExit(f"Unexpected model output shape: {manifest['output_shape']}")
           PY
+
+      - name: Verify resolved Android ORT runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd android
+            ./gradlew :app:dependencyInsight \
+              --dependency onnxruntime-android \
+              --configuration releaseRuntimeClasspath
+          ) | tee /tmp/wvab-ort-dependency.txt
+          grep -F 'com.microsoft.onnxruntime:onnxruntime-android:1.22.0' /tmp/wvab-ort-dependency.txt >/dev/null
 
       - name: Build split standalone release APKs
         run: flutter build apk --release --split-per-abi
