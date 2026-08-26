@@ -172,7 +172,7 @@ void main() {
     await tester.tap(find.byKey(const Key('about-privacy')));
     await _pumpNavigation(tester);
     expect(find.text('Privacy Policy'), findsWidgets);
-    expect(find.textContaining('smshagor.dev@gmail.com'), findsOneWidget);
+    expect(find.text('Camera and visual processing'), findsOneWidget);
     await tester.pageBack();
     await _pumpNavigation(tester);
 
