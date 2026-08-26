@@ -74,7 +74,14 @@ jobs:
         run: flutter analyze
 
       - name: Run Flutter tests
-        run: flutter test
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test_file in test/*_test.dart; do
+            echo "::group::${test_file}"
+            timeout --signal=TERM --kill-after=10s 90s flutter test "$test_file" -r expanded
+            echo "::endgroup::"
+          done
 
       - name: Generate Android host project and launcher branding
         run: bash tool/bootstrap_android.sh
