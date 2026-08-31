@@ -14,7 +14,7 @@ pyttsx3>=2.90,<3
 
 # Network and HTTP
 urllib3>=2.2,<3
-requests>=2.31,<3
+requests>=2.34.2,<3
 
 # Utilities
 Pillow>=10,<12
