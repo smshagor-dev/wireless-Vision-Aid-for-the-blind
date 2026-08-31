@@ -18,7 +18,7 @@ requests>=2.31,<3
 
 # Utilities
 Pillow>=10,<12
-PyYAML>=6,<7
+PyYAML>=6.0.3,<7
 psutil>=5.9,<8
 
 # Security / Realtime Control
