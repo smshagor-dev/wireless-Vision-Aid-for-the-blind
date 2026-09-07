@@ -2,7 +2,7 @@
 # default edge install; see requirements-accelerators.txt.
 
 # Computer Vision and Machine Learning
-opencv-python>=4.8,<5
+opencv-python>=5.0.0.93,<6
 ultralytics>=8.2,<9
 torch>=2.13.0,<3
 torchvision>=0.17,<1
