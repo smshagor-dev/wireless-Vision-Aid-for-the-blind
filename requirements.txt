@@ -26,4 +26,4 @@ pycryptodome>=3.20,<4
 websockets>=12,<16
 
 # Metrics
-prometheus-client>=0.20,<1
+prometheus-client>=0.26.0,<1
